@@ -3,7 +3,7 @@ import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Gtk, Adw, GLib, Gdk
-import threading
+import threading, subprocess, time
 
 from config import load_cfg, save_json, load_json, FAVS_FILE, RECENT_FILE
 from css import CSS
@@ -27,6 +27,17 @@ class DZSL(Adw.Application):
         self.win.set_default_size(1280, 780)
         self.win.set_decorated(True)
         self.win.set_resizable(True)
+        self.win.maximize()
+
+        # Set app icon
+        import os
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        icon_path = os.path.join(script_dir, "assets", "icon.png")
+        if os.path.exists(icon_path):
+            self.win.set_icon_name("dzsl")
+            gtk_icon_theme = Gtk.IconTheme.get_for_display(Gdk.Display.get_default())
+            gtk_icon_theme.add_search_path(os.path.join(script_dir, "assets"))
+            Gtk.Window.set_default_icon_name("dzsl")
 
         css = Gtk.CssProvider()
         css.load_from_data(CSS.encode())
@@ -128,15 +139,16 @@ class DZSL(Adw.Application):
         port = server.get("port") or server.get("gamePort")
         idx  = next((i for i, f in enumerate(self.favorites) if f.get("ip") == ip and f.get("port") == port), None)
         if idx is not None:
-            self.favorites.pop(idx); btn.set_label("SAVE" if "SAVE" in btn.get_label() else "o")
+            self.favorites.pop(idx)
+            btn.set_label("SAVE")
             self.set_status(f"Removed {server.get('name', ip)}")
         else:
-            self.favorites.append(server); btn.set_label("SAVED" if "SAVED" in btn.get_label() else "*")
+            self.favorites.append(server)
+            btn.set_label("SAVED")
             self.set_status(f"Saved {server.get('name', ip)}")
         save_json(FAVS_FILE, self.favorites)
 
     def _startup_steam_check(self):
-        import subprocess
         is_running = subprocess.run(["pgrep", "-x", "steam"], capture_output=True).returncode == 0
         if is_running:
             self.set_status("Steam is running OK")
@@ -144,7 +156,6 @@ class DZSL(Adw.Application):
             GLib.idle_add(self._prompt_steam)
 
     def _prompt_steam(self):
-        import subprocess, threading, time
         d = Adw.MessageDialog(transient_for=self.win)
         d.set_heading("Steam is not running")
         d.set_body("DZSL needs Steam to launch DayZ. Start Steam now?")
