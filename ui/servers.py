@@ -4,7 +4,7 @@ from gi.repository import Gtk, GLib
 import requests, threading
 from ui.server_row import ServerRow
 
-API_URL = "https://dzsl.vercel.app/api/servers"
+API_URL = "https://dayzsalauncher.com/api/v1/launcher/servers/dayz"
 MAP_KEYS = ["", "chernarus", "namalsk", "livonia", "deer isle", "takistan", "esseker", "banov", "enoch"]
 
 # Persist filter state between view switches
