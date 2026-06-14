@@ -4,8 +4,19 @@ from gi.repository import Gtk, GLib
 import requests, threading
 from ui.server_row import ServerRow
 
-API_URL = "https://dayzsalauncher.com/api/v1/launcher/servers/dayz"
+API_URL = "https://dzsl.vercel.app/api/servers"
 MAP_KEYS = ["", "chernarus", "namalsk", "livonia", "deer isle", "takistan", "esseker", "banov", "enoch"]
+
+# Persist filter state between view switches
+_filter_state = {
+    "search": "",
+    "map": 0,
+    "maxp": 0,
+    "checks": {},
+    "sort_key": "players",
+    "sort_rev": True,
+    "servers": [],
+}
 
 class ServersView:
     def __init__(self, panel, cfg, favorites, connect_cb, fav_cb, set_status):
@@ -15,9 +26,9 @@ class ServersView:
         self.connect_cb  = connect_cb
         self.fav_cb      = fav_cb
         self.set_status  = set_status
-        self.all_servers = []
-        self.sort_key    = "players"
-        self.sort_rev    = True
+        self.all_servers = _filter_state["servers"]
+        self.sort_key    = _filter_state["sort_key"]
+        self.sort_rev    = _filter_state["sort_rev"]
 
     def build(self):
         root = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
@@ -58,7 +69,7 @@ class ServersView:
             ("no_be",      "BattlEye OFF"),
         ]:
             cb = Gtk.CheckButton(label=lbl); cb.add_css_class("filter-check")
-            cb.connect("toggled", lambda *a: self.apply_filters())
+            cb.connect("toggled", lambda *a: self._save_and_filter())
             self.chk[key] = cb; fp.append(cb)
 
         # Reset / Refresh
@@ -103,10 +114,25 @@ class ServersView:
         root.append(right)
         self.panel.append(root)
 
-        self.search.connect("changed", lambda *a: self.apply_filters())
-        self.f_map.connect("notify::selected", lambda *a: self.apply_filters())
-        self.f_maxp.connect("notify::selected", lambda *a: self.apply_filters())
-        self.fetch()
+        # Restore previous filter state
+        if _filter_state["search"]:
+            self.search.set_text(_filter_state["search"])
+        if _filter_state["map"]:
+            self.f_map.set_selected(_filter_state["map"])
+        if _filter_state["maxp"]:
+            self.f_maxp.set_selected(_filter_state["maxp"])
+        for key, val in _filter_state["checks"].items():
+            if key in self.chk:
+                self.chk[key].set_active(val)
+
+        self.search.connect("changed", lambda *a: self._save_and_filter())
+        self.f_map.connect("notify::selected", lambda *a: self._save_and_filter())
+        self.f_maxp.connect("notify::selected", lambda *a: self._save_and_filter())
+
+        if self.all_servers:
+            self.apply_filters()
+        else:
+            self.fetch()
 
     def _sort_by(self, key):
         if self.sort_key == key: self.sort_rev = not self.sort_rev
@@ -119,6 +145,13 @@ class ServersView:
         self.f_maxp.set_selected(0)
         for cb in self.chk.values(): cb.set_active(False)
 
+    def _save_and_filter(self):
+        _filter_state["search"] = self.search.get_text()
+        _filter_state["map"]    = self.f_map.get_selected()
+        _filter_state["maxp"]   = self.f_maxp.get_selected()
+        _filter_state["checks"] = {k: v.get_active() for k, v in self.chk.items()}
+        self.apply_filters()
+
     def fetch(self):
         self.set_status("Fetching server list...")
         threading.Thread(target=self._fetch_thread, daemon=True).start()
@@ -128,6 +161,7 @@ class ServersView:
             r = requests.get(API_URL, headers={"User-Agent": "DZSL/1.0"}, timeout=20)
             data = r.json()
             self.all_servers = data if isinstance(data, list) else data.get("result", data.get("servers", data.get("data", [])))
+            _filter_state["servers"] = self.all_servers
             total_players = sum(s.get("players", 0) for s in self.all_servers)
             self.set_status(f"{len(self.all_servers):,} servers  ·  {total_players:,} players online")
             GLib.idle_add(self.apply_filters)

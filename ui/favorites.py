@@ -17,6 +17,9 @@ class ListView:
         tb.add_css_class("toolbar")
         se = Gtk.Entry(); se.set_placeholder_text("Search...")
         se.add_css_class("search-box"); se.set_hexpand(True); tb.append(se)
+        rb = Gtk.Button(label="Refresh"); rb.add_css_class("toolbar-btn")
+        rb.connect("clicked", lambda b: self._populate(box, self.servers))
+        tb.append(rb)
         self.panel.append(tb)
 
         scroll = Gtk.ScrolledWindow(); scroll.set_vexpand(True)
@@ -30,6 +33,7 @@ class ListView:
             or e.get_text().lower() in s.get("map", "").lower()
         ]))
 
+        rb.connect("clicked", lambda b: self._populate(box, self.servers))
         scroll.set_child(box); self.panel.append(scroll)
 
     def _populate(self, box, servers):
