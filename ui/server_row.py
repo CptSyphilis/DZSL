@@ -1,6 +1,8 @@
 import gi
 gi.require_version('Gtk', '4.0')
-from gi.repository import Gtk
+gi.require_version('Adw', '1')
+from gi.repository import Gtk, Adw, Gdk, GLib
+import subprocess, threading, requests
 
 def ping_cls(p):
     if p is None: return "ping-bad"

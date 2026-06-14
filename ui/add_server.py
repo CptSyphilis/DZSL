@@ -21,6 +21,27 @@ class AddServerView:
 
         lbl = Gtk.Label(label="ADD SERVER"); lbl.add_css_class("settings-title"); lbl.set_halign(Gtk.Align.START); box.append(lbl)
 
+        # Direct connect from clipboard
+        paste_btn = Gtk.Button(label="Paste IP from Clipboard")
+        paste_btn.add_css_class("btn-ghost")
+        def do_paste(b):
+            from gi.repository import Gdk
+            display = Gdk.Display.get_default()
+            clipboard = display.get_clipboard()
+            def on_text(clip, result):
+                try:
+                    text = clip.read_text_finish(result).strip()
+                    if ":" in text:
+                        parts = text.rsplit(":", 1)
+                        self.ip_e.set_text(parts[0])
+                        self.pt_e.set_text(parts[1])
+                    else:
+                        self.ip_e.set_text(text)
+                except: pass
+            clipboard.read_text_async(None, on_text)
+        paste_btn.connect("clicked", do_paste)
+        box.append(paste_btn)
+
         self.ip_e = Gtk.Entry(); self.ip_e.set_placeholder_text("Server IP  e.g. 193.25.252.82"); self.ip_e.add_css_class("settings-input"); box.append(self.ip_e)
         self.pt_e = Gtk.Entry(); self.pt_e.set_placeholder_text("Game port  e.g. 2402"); self.pt_e.add_css_class("settings-input"); box.append(self.pt_e)
         self.nm_e = Gtk.Entry(); self.nm_e.set_placeholder_text("Name (optional — auto-detected)"); self.nm_e.add_css_class("settings-input"); box.append(self.nm_e)

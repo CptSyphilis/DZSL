@@ -109,4 +109,9 @@ window { background: #0d0d0d; }
 .fav-star:hover { color: #fff; }
 .fav-star-empty { background: transparent; border: none; color: #2a2a2a; font-size: 16px; padding: 0 8px; }
 .fav-star-empty:hover { color: #d4b483; }
+/* Context menu */
+.context-btn { background: #161616; border: none; border-radius: 2px; color: #aaa;
+               font-size: 12px; padding: 6px 16px; text-align: left; }
+.context-btn:hover { background: #1e1e1e; color: #d4b483; }
+
 """
