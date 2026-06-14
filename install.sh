@@ -73,30 +73,6 @@ detect_steam() {
     STEAM_ROOT="$HOME/.local/share/Steam"
 }
 
-detect_launcher() {
-    echo "Detecting DayZ CLI launcher..."
-    LAUNCHER_PATHS=(
-        "$HOME/dzcli/dayz-launcher.sh"
-        "$HOME/dayz-linux-cli-launcher/dayz-launcher.sh"
-        "/usr/local/bin/dayz-launcher.sh"
-    )
-    for p in "${LAUNCHER_PATHS[@]}"; do
-        if [ -f "$p" ]; then
-            echo "Found launcher at: $p"
-            LAUNCHER_PATH="$p"
-            return
-        fi
-    done
-    echo "CLI launcher not found. Installing..."
-    git clone https://github.com/bastimeyer/dayz-linux-cli-launcher.git "$HOME/dzcli"
-    LAUNCHER_PATH="$HOME/dzcli/dayz-launcher.sh"
-    chmod +x "$LAUNCHER_PATH"
-    # Install launcher deps
-    sudo apt install -y gawk fzf 2>/dev/null || \
-    sudo dnf install -y gawk fzf 2>/dev/null || \
-    sudo pacman -Sy --noconfirm gawk fzf 2>/dev/null || true
-}
-
 write_config() {
     echo "Writing config..."
     mkdir -p "$HOME/.config/dzsl"
