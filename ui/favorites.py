@@ -4,13 +4,14 @@ from gi.repository import Gtk
 from ui.server_row import ServerRow
 
 class ListView:
-    def __init__(self, panel, servers, empty_msg, favorites, connect_cb, fav_cb):
+    def __init__(self, panel, servers, empty_msg, favorites, connect_cb, fav_cb, load_mods_cb=None):
         self.panel      = panel
         self.servers    = servers
         self.empty_msg  = empty_msg
         self.favorites  = favorites
         self.connect_cb = connect_cb
         self.fav_cb     = fav_cb
+        self.load_mods_cb = load_mods_cb
 
     def build(self):
         tb = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
@@ -46,4 +47,4 @@ class ListView:
             return
         for s in servers:
             is_fav = any(f.get("ip") == s.get("ip") and f.get("port") == s.get("port") for f in self.favorites)
-            box.append(ServerRow(s, self.connect_cb, self.fav_cb, is_fav))
+            box.append(ServerRow(s, self.connect_cb, self.fav_cb, is_fav, self.load_mods_cb))

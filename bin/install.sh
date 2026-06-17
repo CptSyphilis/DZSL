@@ -1,12 +1,15 @@
 #!/bin/bash
 # DZSL - DayZ Server List for Linux
 # Install script - supports Ubuntu/Debian, Fedora/RHEL, Arch
-
 set -e
 
+BIN_DIR="$(cd "$(dirname "$0")" && pwd)"
+APP_DIR="$(cd "$BIN_DIR/.." && pwd)"
+LAUNCHER_PATH="$BIN_DIR/dayz-launcher.sh"
+
 echo "╔══════════════════════════════════╗"
-echo "║   DZSL - DayZ Server List        ║"
-echo "║   Linux Installer                ║"
+echo "║ DZSL - DayZ Server List ║"
+echo "║ Linux Installer ║"
 echo "╚══════════════════════════════════╝"
 echo ""
 
@@ -29,22 +32,22 @@ install_deps() {
             sudo apt update
             sudo apt install -y python3 python3-gi python3-gi-cairo \
                 gir1.2-gtk-4.0 gir1.2-adw-1 python3-requests \
-                libgirepository1.0-dev
+                libgirepository1.0-dev gawk curl jq
             ;;
         fedora|rhel|centos)
             echo "Installing dependencies (dnf)..."
             sudo dnf install -y python3 python3-gobject python3-requests \
-                gtk4 libadwaita
+                gtk4 libadwaita gawk curl jq
             ;;
         arch|manjaro|endeavouros)
             echo "Installing dependencies (pacman)..."
             sudo pacman -Sy --noconfirm python python-gobject python-requests \
-                gtk4 libadwaita
+                gtk4 libadwaita gawk curl jq
             ;;
         opensuse*|sles)
             echo "Installing dependencies (zypper)..."
             sudo zypper install -y python3 python3-gobject python3-requests \
-                typelib-1_0-Gtk-4_0 typelib-1_0-Adw-1
+                typelib-1_0-Gtk-4_0 typelib-1_0-Adw-1 gawk curl jq
             ;;
         *)
             echo "Unknown distro: $DISTRO"
@@ -73,6 +76,12 @@ detect_steam() {
     STEAM_ROOT="$HOME/.local/share/Steam"
 }
 
+setup_launcher() {
+    echo "Setting up bundled DayZ launcher..."
+    chmod +x "$LAUNCHER_PATH"
+    echo "Using launcher at: $LAUNCHER_PATH"
+}
+
 write_config() {
     echo "Writing config..."
     mkdir -p "$HOME/.config/dzsl"
@@ -96,14 +105,13 @@ CFGEOF
 
 create_desktop_entry() {
     echo "Creating desktop shortcut..."
-    SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
     mkdir -p "$HOME/.local/share/applications"
     cat > "$HOME/.local/share/applications/dzsl.desktop" << DESKEOF
 [Desktop Entry]
 Name=DZSL
 Comment=DayZ Server List for Linux
-Exec=python3 $SCRIPT_DIR/main.py
-Icon=$SCRIPT_DIR/assets/icon.png
+Exec=python3 $APP_DIR/main.py
+Icon=$APP_DIR/assets/icon.png
 Terminal=false
 Type=Application
 Categories=Game;
@@ -112,16 +120,16 @@ DESKEOF
     echo "Desktop shortcut created."
 }
 
-# Run
+# Run installation
 install_deps
 detect_steam
-detect_launcher
+setup_launcher
 write_config
 create_desktop_entry
 
 echo ""
 echo "✓ DZSL installed successfully!"
 echo ""
-echo "Run with:  python3 $(pwd)/main.py"
+echo "Run with: python3 $APP_DIR/main.py"
 echo "Or find DZSL in your application menu."
 echo ""

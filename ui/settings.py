@@ -41,7 +41,7 @@ class SettingsView:
 
         section("PATHS")
         path_row("Steam Library Root",  "steam_root",    "/mnt/Storage1tb/SteamLibrary")
-        path_row("CLI Launcher Path",   "launcher_path", "~/dzcli/dayz-launcher.sh")
+        path_row("CLI Launcher Path",   "launcher_path", "bin/dayz-launcher.sh")
         path_row("Custom Mods Folder (blank = auto)", "mods_dir", "leave blank for auto-detect")
 
         section("LAUNCH OPTIONS")

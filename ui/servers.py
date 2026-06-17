@@ -1,8 +1,8 @@
 import gi
 gi.require_version('Gtk', '4.0')
-from gi.repository import Gtk, GLib
+from gi.repository import Gtk, GLib, Gdk
 import requests, threading
-from ui.server_row import ServerRow
+from ui.server_row import ServerRow, copy_text, popup_at_cursor, dismiss_popover
 
 API_URL = "https://dayzsalauncher.com/api/v1/launcher/servers/dayz"
 MAP_KEYS = ["", "chernarus", "namalsk", "livonia", "deer isle", "takistan", "esseker", "banov", "enoch"]
@@ -20,15 +20,15 @@ _filter_state = {
 
 class ServersView:
     def __init__(self, panel, cfg, favorites, connect_cb, fav_cb, set_status):
-        self.panel       = panel
-        self.cfg         = cfg
-        self.favorites   = favorites
-        self.connect_cb  = connect_cb
-        self.fav_cb      = fav_cb
-        self.set_status  = set_status
+        self.panel = panel
+        self.cfg = cfg
+        self.favorites = favorites
+        self.connect_cb = connect_cb
+        self.fav_cb = fav_cb
+        self.set_status = set_status
         self.all_servers = _filter_state["servers"]
-        self.sort_key    = _filter_state["sort_key"]
-        self.sort_rev    = _filter_state["sort_rev"]
+        self.sort_key = _filter_state["sort_key"]
+        self.sort_rev = _filter_state["sort_rev"]
 
     def build(self):
         root = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
@@ -57,16 +57,16 @@ class ServersView:
         fp.append(flbl("FILTERS"))
         self.chk = {}
         for key, lbl in [
-            ("favonly",    "Favourites only"),
+            ("favonly", "Favourites only"),
             ("hasplayers", "Has players"),
-            ("nopass",     "No password"),
-            ("modded",     "Modded only"),
-            ("vanilla",    "Vanilla only"),
-            ("online",     "Online only"),
+            ("nopass", "No password"),
+            ("modded", "Modded only"),
+            ("vanilla", "Vanilla only"),
+            ("online", "Online only"),
             ("firstperson","First person"),
             ("thirdperson","Third person"),
-            ("battleye",   "BattlEye ON"),
-            ("no_be",      "BattlEye OFF"),
+            ("battleye", "BattlEye ON"),
+            ("no_be", "BattlEye OFF"),
         ]:
             cb = Gtk.CheckButton(label=lbl); cb.add_css_class("filter-check")
             cb.connect("toggled", lambda *a: self._save_and_filter())
@@ -76,6 +76,7 @@ class ServersView:
         sep = Gtk.Separator(); sep.set_margin_top(8); sep.set_margin_bottom(4); fp.append(sep)
         reset_btn = Gtk.Button(label="RESET"); reset_btn.add_css_class("btn-ghost")
         reset_btn.connect("clicked", self._reset_filters); fp.append(reset_btn)
+
         refresh_btn = Gtk.Button(label="REFRESH"); refresh_btn.add_css_class("toolbar-btn"); refresh_btn.add_css_class("accent")
         refresh_btn.connect("clicked", lambda b: self.fetch()); fp.append(refresh_btn)
 
@@ -96,11 +97,11 @@ class ServersView:
 
         self.col_btns = {}
         fav_col = Gtk.Label(label="FAV"); fav_col.add_css_class("col-label"); fav_col.set_size_request(40, -1); col_hdr.append(fav_col)
-        name_b = col_btn("NAME  ↕", "name"); name_b.set_hexpand(True); col_hdr.append(name_b); self.col_btns["name"] = name_b
-        col_hdr.append(col_btn("MAP  ↕",     "map",     120))
-        col_hdr.append(col_btn("PLAYERS  ↕", "players", 90))
-        col_hdr.append(col_btn("PING  ↕",    "ping",    70))
-        col_hdr.append(col_btn("MODS  ↕",    "mods",    60))
+        name_b = col_btn("NAME ↕", "name"); name_b.set_hexpand(True); col_hdr.append(name_b); self.col_btns["name"] = name_b
+        col_hdr.append(col_btn("MAP ↕", "map", 120))
+        col_hdr.append(col_btn("PLAYERS ↕", "players", 90))
+        col_hdr.append(col_btn("PING ↕", "ping", 70))
+        col_hdr.append(col_btn("MODS ↕", "mods", 60))
         act_col = Gtk.Label(label=""); act_col.set_size_request(80, -1); col_hdr.append(act_col)
         right.append(col_hdr)
 
@@ -108,10 +109,12 @@ class ServersView:
         scroll = Gtk.ScrolledWindow(); scroll.set_vexpand(True)
         scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         self.srv_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+
         loading = Gtk.Label(label="Loading servers..."); loading.add_css_class("empty"); loading.set_margin_top(60)
         self.srv_box.append(loading)
         scroll.set_child(self.srv_box); right.append(scroll)
         root.append(right)
+
         self.panel.append(root)
 
         # Restore previous filter state
@@ -135,8 +138,11 @@ class ServersView:
             self.fetch()
 
     def _sort_by(self, key):
-        if self.sort_key == key: self.sort_rev = not self.sort_rev
-        else: self.sort_key = key; self.sort_rev = True
+        if self.sort_key == key:
+            self.sort_rev = not self.sort_rev
+        else:
+            self.sort_key = key
+            self.sort_rev = True
         self.apply_filters()
 
     def _reset_filters(self, b=None):
@@ -147,8 +153,8 @@ class ServersView:
 
     def _save_and_filter(self):
         _filter_state["search"] = self.search.get_text()
-        _filter_state["map"]    = self.f_map.get_selected()
-        _filter_state["maxp"]   = self.f_maxp.get_selected()
+        _filter_state["map"] = self.f_map.get_selected()
+        _filter_state["maxp"] = self.f_maxp.get_selected()
         _filter_state["checks"] = {k: v.get_active() for k, v in self.chk.items()}
         self.apply_filters()
 
@@ -163,28 +169,28 @@ class ServersView:
             self.all_servers = data if isinstance(data, list) else data.get("result", data.get("servers", data.get("data", [])))
             _filter_state["servers"] = self.all_servers
             total_players = sum(s.get("players", 0) for s in self.all_servers)
-            self.set_status(f"{len(self.all_servers):,} servers  ·  {total_players:,} players online")
+            self.set_status(f"{len(self.all_servers):,} servers · {total_players:,} players online")
             GLib.idle_add(self.apply_filters)
         except Exception as e:
             self.set_status(f"Failed to load servers: {e}")
 
     def apply_filters(self):
-        q   = self.search.get_text().lower() if hasattr(self, "search") else ""
-        mi  = self.f_map.get_selected()
+        q = self.search.get_text().lower() if hasattr(self, "search") else ""
+        mi = self.f_map.get_selected()
         mxi = self.f_maxp.get_selected()
         fav_ips = {(f.get("ip"), f.get("port")) for f in self.favorites}
-
         out = []
+
         for s in self.all_servers:
-            nm  = s.get("name", "").lower()
-            mp  = s.get("map", "").lower()
-            pl  = s.get("players", 0)
+            nm = s.get("name", "").lower()
+            mp = s.get("map", "").lower()
+            pl = s.get("players", 0)
             mxp = s.get("maxPlayers", s.get("maxplayers", 1)) or 1
             mod = bool(s.get("mods")) or s.get("modded", False)
-            fp  = s.get("firstPersonOnly") or s.get("firstperson", False)
-            pw  = s.get("password") or s.get("hasPassword", False)
-            be  = s.get("battlEye", s.get("battleye", True))
-            ip  = s.get("ip") or s.get("endpoint", {}).get("ip", "")
+            fp = s.get("firstPersonOnly") or s.get("firstperson", False)
+            pw = s.get("password") or s.get("hasPassword", False)
+            be = s.get("battlEye", s.get("battleye", True))
+            ip = s.get("ip") or s.get("endpoint", {}).get("ip", "")
             port = s.get("port") or s.get("gamePort") or s.get("endpoint", {}).get("port", 0)
             is_fav = (ip, port) in fav_ips
 
@@ -194,47 +200,53 @@ class ServersView:
                     if MAP_KEYS[mi] not in mp: continue
                 else:
                     if any(k in mp for k in MAP_KEYS[1:]): continue
-            if mxi == 1 and mxp > 10:  continue
-            if mxi == 2 and mxp > 20:  continue
-            if mxi == 3 and mxp > 40:  continue
-            if mxi == 4 and mxp > 60:  continue
+            if mxi == 1 and mxp > 10: continue
+            if mxi == 2 and mxp > 20: continue
+            if mxi == 3 and mxp > 40: continue
+            if mxi == 4 and mxp > 60: continue
             if mxi == 5 and mxp <= 60: continue
 
-            if self.chk["favonly"].get_active()    and not is_fav: continue
-            if self.chk["hasplayers"].get_active() and pl == 0:    continue
-            if self.chk["nopass"].get_active()     and pw:         continue
-            if self.chk["modded"].get_active()     and not mod:    continue
-            if self.chk["vanilla"].get_active()    and mod:        continue
-            if self.chk["online"].get_active()     and pl == 0:    continue
-            if self.chk["firstperson"].get_active()  and not fp:   continue
-            if self.chk["thirdperson"].get_active()  and fp:       continue
-            if self.chk["battleye"].get_active()   and not be:     continue
-            if self.chk["no_be"].get_active()      and be:         continue
+            if self.chk["favonly"].get_active() and not is_fav: continue
+            if self.chk["hasplayers"].get_active() and pl == 0: continue
+            if self.chk["nopass"].get_active() and pw: continue
+            if self.chk["modded"].get_active() and not mod: continue
+            if self.chk["vanilla"].get_active() and mod: continue
+            if self.chk["online"].get_active() and pl == 0: continue
+            if self.chk["firstperson"].get_active() and not fp: continue
+            if self.chk["thirdperson"].get_active() and fp: continue
+            if self.chk["battleye"].get_active() and not be: continue
+            if self.chk["no_be"].get_active() and be: continue
 
             out.append(s)
 
         # Sort
         def sort_val(s):
-            if self.sort_key == "name":    return s.get("name", "").lower()
-            if self.sort_key == "map":     return s.get("map", "").lower()
+            if self.sort_key == "name": return s.get("name", "").lower()
+            if self.sort_key == "map": return s.get("map", "").lower()
             if self.sort_key == "players": return s.get("players", 0)
-            if self.sort_key == "ping":    return s.get("ping") or 9999
-            if self.sort_key == "mods":    return len(s.get("mods", []))
+            if self.sort_key == "ping": return s.get("ping") or 9999
+            if self.sort_key == "mods": return len(s.get("mods", []))
             return 0
+
         out.sort(key=sort_val, reverse=self.sort_rev)
 
         # Populate
         c = self.srv_box.get_first_child()
-        while c: n = c.get_next_sibling(); self.srv_box.remove(c); c = n
+        while c:
+            n = c.get_next_sibling()
+            self.srv_box.remove(c)
+            c = n
 
         if not out:
-            el = Gtk.Label(label="No servers match your filters."); el.add_css_class("empty"); el.set_margin_top(60); self.srv_box.append(el)
+            el = Gtk.Label(label="No servers match your filters.")
+            el.add_css_class("empty")
+            el.set_margin_top(60)
+            self.srv_box.append(el)
         else:
-            fav_set = {(f.get("ip"), f.get("port")) for f in self.favorites}
             for s in out[:500]:
-                ip   = s.get("ip") or s.get("endpoint", {}).get("ip", "")
+                ip = s.get("ip") or s.get("endpoint", {}).get("ip", "")
                 port = s.get("port") or s.get("gamePort") or s.get("endpoint", {}).get("port", 0)
-                self.srv_box.append(TableRow(s, self.connect_cb, self.fav_cb, (ip, port) in fav_set))
+                self.srv_box.append(TableRow(s, self.connect_cb, self.fav_cb, (ip, port) in fav_ips))
 
         self.set_status(f"Showing {min(len(out), 500):,} of {len(self.all_servers):,} servers")
 
@@ -243,16 +255,18 @@ class TableRow(Gtk.Box):
     def __init__(self, s, on_connect, on_fav, is_fav):
         super().__init__(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
         self.add_css_class("table-row")
+        self.server = s
+        self.on_connect = on_connect
+        self.on_fav = on_fav
 
-        ip   = s.get("ip") or s.get("endpoint", {}).get("ip", "")
+        ip = s.get("ip") or s.get("endpoint", {}).get("ip", "")
         port = s.get("port") or s.get("gamePort") or s.get("endpoint", {}).get("port", "")
         mods = s.get("mods", [])
-        mod  = bool(mods) or s.get("modded", False)
-        fp   = s.get("firstPersonOnly") or s.get("firstperson", False)
-        pw   = s.get("password") or s.get("hasPassword", False)
-        be   = s.get("battlEye", s.get("battleye", True))
-        pl   = s.get("players", 0)
-        mxp  = s.get("maxPlayers", s.get("maxplayers", 0))
+        fp = s.get("firstPersonOnly") or s.get("firstperson", False)
+        pw = s.get("password") or s.get("hasPassword", False)
+        be = s.get("battlEye", s.get("battleye", True))
+        pl = s.get("players", 0)
+        mxp = s.get("maxPlayers", s.get("maxplayers", 0))
         ping = s.get("ping")
 
         # Fav star
@@ -273,6 +287,7 @@ class TableRow(Gtk.Box):
         if not be:
             nobe = Gtk.Label(label="NO BE"); nobe.add_css_class("tag"); nobe.add_css_class("tag-van"); top.append(nobe)
         info.append(top)
+
         if mods:
             mod_names = ", ".join(m.get("name", "") for m in mods[:4])
             if len(mods) > 4: mod_names += f" +{len(mods)-4} more"
@@ -295,7 +310,7 @@ class TableRow(Gtk.Box):
 
         # Ping
         ping_txt = f"{ping}" if ping else "—"
-        if ping and ping < 80:   ping_cls = "ping-good"
+        if ping and ping < 80: ping_cls = "ping-good"
         elif ping and ping < 150: ping_cls = "ping-ok"
         else: ping_cls = "ping-bad"
         ping_lbl = Gtk.Label(label=ping_txt); ping_lbl.add_css_class(ping_cls)
@@ -312,3 +327,45 @@ class TableRow(Gtk.Box):
         cb.set_size_request(80, -1)
         cb.connect("clicked", lambda b: on_connect(s))
         self.append(cb)
+
+        # Right-click menu
+        gesture = Gtk.GestureClick.new()
+        gesture.set_button(3)
+        gesture.connect("pressed", self._on_right_click)
+        self.add_controller(gesture)
+
+    def _on_right_click(self, gesture, n_press, x, y):
+        if n_press != 1:
+            return
+
+        dismiss_popover(getattr(self, "_popover", None))
+        menu = Gtk.Popover.new()
+        self._popover = menu
+        menu.connect("closed", lambda *_: dismiss_popover(menu))
+
+        vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        vbox.set_margin_top(8)
+        vbox.set_margin_bottom(8)
+        vbox.set_margin_start(12)
+        vbox.set_margin_end(12)
+
+        btn_join = Gtk.Button(label="Join Server")
+        btn_join.connect("clicked", lambda b: (self.on_connect(self.server), menu.popdown()))
+        vbox.append(btn_join)
+
+        btn_fav = Gtk.Button(label="Toggle Favorite")
+        btn_fav.connect("clicked", lambda b: (self.on_fav(self.server, None), menu.popdown()))
+        vbox.append(btn_fav)
+
+        btn_copy = Gtk.Button(label="Copy IP:Port")
+        btn_copy.connect("clicked", lambda b: self._copy_ip(menu))
+        vbox.append(btn_copy)
+
+        menu.set_child(vbox)
+        popup_at_cursor(menu, self, x, y)
+
+    def _copy_ip(self, menu):
+        ip = self.server.get("ip") or self.server.get("endpoint", {}).get("ip", "")
+        port = self.server.get("port") or self.server.get("gamePort") or 2302
+        copy_text(f"{ip}:{port}")
+        menu.popdown()

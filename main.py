@@ -18,7 +18,7 @@ class DZSL(Adw.Application):
     def __init__(self):
         super().__init__(application_id="com.dzsl.app")
         self.connect("activate", self.on_activate)
-        self.cfg       = load_cfg()
+        self.cfg = load_cfg()
         self.favorites = load_json(FAVS_FILE)
 
     def on_activate(self, app):
@@ -49,7 +49,7 @@ class DZSL(Adw.Application):
 
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
 
-        # Native header bar — Wayland uses this for dragging/resizing
+        # Native header bar
         header_bar = Adw.HeaderBar()
         header_bar.add_css_class("app-header")
         header_bar.set_show_end_title_buttons(True)
@@ -113,20 +113,25 @@ class DZSL(Adw.Application):
 
     def clear_panel(self):
         c = self.panel.get_first_child()
-        while c: n = c.get_next_sibling(); self.panel.remove(c); c = n
+        while c:
+            n = c.get_next_sibling()
+            self.panel.remove(c)
+            c = n
 
     def show_view(self, view):
         self.clear_panel()
         for k, b in self.nav_btns.items():
-            if k == view: b.add_css_class("active")
-            else: b.remove_css_class("active")
+            if k == view:
+                b.add_css_class("active")
+            else:
+                b.remove_css_class("active")
 
         if view == "favorites":
-            ListView(self.panel, self.favorites, "No saved servers yet.\nUse Browse or Add Server.", self.favorites, self.connector.connect, self.toggle_fav).build()
+            ListView(self.panel, self.favorites, "No saved servers yet.\nUse Browse or Add Server.", self.favorites, self.connector.connect, self.toggle_fav, self.connector.load_mods).build()
         elif view == "recent":
-            ListView(self.panel, load_json(RECENT_FILE), "No recently joined servers.", self.favorites, self.connector.connect, self.toggle_fav).build()
+            ListView(self.panel, load_json(RECENT_FILE), "No recently joined servers.", self.favorites, self.connector.connect, self.toggle_fav, self.connector.load_mods).build()
         elif view == "servers":
-            ServersView(self.panel, self.cfg, self.favorites, self.connector.connect, self.toggle_fav, self.set_status).build()
+            ServersView(self.panel, self.cfg, self.favorites, self.connector.connect, self.toggle_fav, self.set_status, self.connector.load_mods).build()
         elif view == "add":
             AddServerView(self.panel, self.favorites, self.set_status).build()
         elif view == "mods":
@@ -134,18 +139,32 @@ class DZSL(Adw.Application):
         elif view == "settings":
             SettingsView(self.panel, self.cfg, self.set_status, lambda: self.show_view("settings")).build()
 
-    def toggle_fav(self, server, btn):
+    def toggle_fav(self, server, btn=None):
         ip   = server.get("ip") or server.get("endpoint", {}).get("ip")
-        port = server.get("port") or server.get("gamePort")
-        idx  = next((i for i, f in enumerate(self.favorites) if f.get("ip") == ip and f.get("port") == port), None)
+        port = server.get("port") or server.get("gamePort") or server.get("gameport")
+
+        # Find existing favorite (more reliable)
+        idx = None
+        for i, f in enumerate(self.favorites):
+            f_ip   = f.get("ip") or f.get("endpoint", {}).get("ip")
+            f_port = f.get("port") or f.get("gamePort") or f.get("gameport")
+            if f_ip == ip and f_port == port:
+                idx = i
+                break
+
         if idx is not None:
+            # Remove
             self.favorites.pop(idx)
-            btn.set_label("SAVE")
+            if btn:
+                btn.set_label("SAVE")
             self.set_status(f"Removed {server.get('name', ip)}")
         else:
+            # Add
             self.favorites.append(server)
-            btn.set_label("SAVED")
+            if btn:
+                btn.set_label("SAVED")
             self.set_status(f"Saved {server.get('name', ip)}")
+
         save_json(FAVS_FILE, self.favorites)
 
     def _startup_steam_check(self):

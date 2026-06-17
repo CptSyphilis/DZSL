@@ -19,21 +19,8 @@ def _detect_steam_root():
     return os.path.expanduser("~/.local/share/Steam")
 
 def _detect_launcher():
-    # First check bundled launcher in bin/
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    bundled = os.path.join(script_dir, "bin", "dayz-launcher.sh")
-    if os.path.isfile(bundled):
-        return bundled
-    # Fall back to external installs
-    candidates = [
-        os.path.expanduser("~/dzcli/dayz-launcher.sh"),
-        os.path.expanduser("~/dayz-linux-cli-launcher/dayz-launcher.sh"),
-        "/usr/local/bin/dayz-launcher.sh",
-    ]
-    for p in candidates:
-        if os.path.isfile(p):
-            return p
-    return bundled
+    return os.path.join(script_dir, "bin", "dayz-launcher.sh")
 
 DEFAULT_CFG = {
     "steam_root":    _detect_steam_root(),
@@ -41,6 +28,7 @@ DEFAULT_CFG = {
     "mods_dir":      "",
     "profile_name":  "",
     "extra_args":    "",
+    "extra_mods":    "",
     "no_splash":     True,
     "no_pause":      True,
     "no_benchmark":  False,
