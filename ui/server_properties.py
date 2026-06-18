@@ -8,22 +8,19 @@ from ui.helpers import (
     format_server_time,
     filter_server_mods,
     transient_window,
-    format_server_subtitle,
     server_tags,
+    server_key,
 )
 
 
-def _row(label, value):
-    box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-    box.set_margin_top(4)
-    box.set_margin_bottom(4)
+def _field(label, value):
+    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
     lbl = Gtk.Label(label=label)
     lbl.add_css_class("settings-label")
     lbl.set_halign(Gtk.Align.START)
-    lbl.set_size_request(120, -1)
     val = Gtk.Label(label=value or "—")
+    val.add_css_class("srv-detail")
     val.set_halign(Gtk.Align.START)
-    val.set_hexpand(True)
     val.set_wrap(True)
     val.set_selectable(True)
     box.append(lbl)
@@ -31,19 +28,19 @@ def _row(label, value):
     return box
 
 
-def _copy_address(parent, ip, port):
-    text = f"{ip}:{port}"
-    Gdk.Display.get_default().get_clipboard().set(
-        Gdk.ContentProvider.new_for_value(text)
-    )
-    win = transient_window(parent)
-    if win:
-        d = Adw.MessageDialog(transient_for=win)
-        d.set_heading("Copied")
-        d.set_body(text)
-        d.add_response("ok", "OK")
-        d.connect("response", lambda dialog, _: dialog.destroy())
-        d.present()
+def _section(title, rows):
+    group = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+    group.add_css_class("settings-group")
+
+    heading = Gtk.Label(label=title)
+    heading.add_css_class("settings-title")
+    heading.set_halign(Gtk.Align.START)
+    group.append(heading)
+
+    for label, value in rows:
+        group.append(_field(label, value))
+
+    return group
 
 
 def show_server_properties(parent, server):
@@ -51,8 +48,8 @@ def show_server_properties(parent, server):
     if not parent_win:
         return
 
-    ip = server.get("ip") or server.get("endpoint", {}).get("ip", "")
-    port = server.get("port") or server.get("gamePort") or server.get("endpoint", {}).get("port", 2302)
+    ip, port = server_key(server)
+    address = f"{ip}:{port}" if ip else "—"
     query_port = server.get("queryPort") or server.get("endpoint", {}).get("queryPort", "")
     map_name = normalize_map_name(server.get("map") or server.get("worldName") or "")
     mods = filter_server_mods(server.get("mods") or [])
@@ -61,82 +58,114 @@ def show_server_properties(parent, server):
     version = server.get("version", "")
     ping = server.get("ping")
     tags = ", ".join(server_tags(server)) or "—"
+    has_password = server.get("password") or server.get("hasPassword")
+    battleye = server.get("battlEye", server.get("battleye", True))
 
-    d = Adw.Dialog()
-    d.set_title(server.get("name", "Server Properties"))
+    win = Adw.Window()
+    win.set_transient_for(parent_win)
+    win.set_modal(True)
+    win.set_title("Server Properties")
+    win.set_default_size(460, 520)
 
-    toolbar = Adw.ToolbarView()
+    root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+
     header = Adw.HeaderBar()
     title = Gtk.Label(label=server.get("name", "Server Properties"))
-    title.add_css_class("title")
+    title.set_ellipsize(3)
+    title.set_max_width_chars(40)
     header.set_title_widget(title)
-    close = Gtk.Button(icon_name="window-close-symbolic")
-    close.connect("clicked", lambda _: d.close())
-    header.pack_end(close)
-    toolbar.add_top_bar(header)
+    root.append(header)
 
     scroll = Gtk.ScrolledWindow()
     scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
     scroll.set_vexpand(True)
 
-    outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-    outer.set_margin_top(12)
-    outer.set_margin_bottom(12)
-    outer.set_margin_start(16)
-    outer.set_margin_end(16)
+    body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+    body.set_margin_top(12)
+    body.set_margin_bottom(12)
+    body.set_margin_start(16)
+    body.set_margin_end(16)
 
-    for label, value in [
-        ("Address", format_server_subtitle(server)),
+    body.append(_section("Connection", [
+        ("Address", address),
         ("Query Port", str(query_port) if query_port else "—"),
+    ]))
+
+    body.append(_section("Server", [
         ("Map", map_name or "—"),
         ("Players", f"{players}/{max_players}" if max_players else str(players)),
-        ("Ping", f"{ping} ms" if ping else "—"),
+        ("Ping", f"{ping} ms" if ping is not None else "—"),
         ("Time", format_server_time(server)),
         ("Version", version or "—"),
         ("Tags", tags),
-        ("Mods", str(len(mods)) if mods else "0"),
-        ("Password", "Yes" if server.get("password") or server.get("hasPassword") else "No"),
-        ("BattlEye", "Yes" if server.get("battlEye", server.get("battleye", True)) else "No"),
-    ]:
-        outer.append(_row(label, str(value)))
+    ]))
+
+    body.append(_section("Security", [
+        ("Password", "Yes" if has_password else "No"),
+        ("BattlEye", "Yes" if battleye else "No"),
+    ]))
 
     if mods:
-        mod_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-        mod_box.set_margin_top(8)
-        mod_lbl = Gtk.Label(label="Mod list")
-        mod_lbl.add_css_class("settings-title")
-        mod_lbl.set_halign(Gtk.Align.START)
-        mod_box.append(mod_lbl)
-        for m in mods[:30]:
+        mod_group = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        mod_group.add_css_class("settings-group")
+        mod_heading = Gtk.Label(label=f"Mods ({len(mods)})")
+        mod_heading.add_css_class("settings-title")
+        mod_heading.set_halign(Gtk.Align.START)
+        mod_group.append(mod_heading)
+
+        mod_scroll = Gtk.ScrolledWindow()
+        mod_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        mod_scroll.set_min_content_height(min(len(mods), 8) * 28)
+        mod_scroll.set_max_content_height(220)
+
+        mod_list = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        for m in mods[:40]:
             name = m.get("name") or m.get("steamWorkshopId") or m.get("id") or "?"
             mid = m.get("steamWorkshopId") or m.get("id") or ""
-            mod_box.append(_row("", f"{name} ({mid})" if mid else name))
-        if len(mods) > 30:
-            mod_box.append(_row("", f"… and {len(mods) - 30} more"))
-        outer.append(mod_box)
+            line = Gtk.Label(label=f"{name}  ({mid})" if mid else name)
+            line.add_css_class("mod-id")
+            line.set_halign(Gtk.Align.START)
+            line.set_wrap(True)
+            line.set_selectable(True)
+            mod_list.append(line)
+        if len(mods) > 40:
+            more = Gtk.Label(label=f"… and {len(mods) - 40} more")
+            more.add_css_class("status-txt")
+            more.set_halign(Gtk.Align.START)
+            mod_list.append(more)
 
-    scroll.set_child(outer)
-    toolbar.set_content(scroll)
+        mod_scroll.set_child(mod_list)
+        mod_group.append(mod_scroll)
+        body.append(mod_group)
 
-    btn_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-    btn_box.set_margin_top(8)
-    btn_box.set_margin_bottom(8)
-    btn_box.set_margin_start(16)
-    btn_box.set_margin_end(16)
-    btn_box.set_halign(Gtk.Align.END)
+    scroll.set_child(body)
+    root.append(scroll)
+
+    btn_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+    btn_row.set_margin_top(8)
+    btn_row.set_margin_bottom(12)
+    btn_row.set_margin_start(16)
+    btn_row.set_margin_end(16)
+    btn_row.set_halign(Gtk.Align.END)
 
     copy_btn = Gtk.Button(label="Copy IP:Port")
     copy_btn.add_css_class("btn-ghost")
-    copy_btn.connect("clicked", lambda _: _copy_address(parent, ip, port))
-    btn_box.append(copy_btn)
+
+    def copy_address(_):
+        if not ip:
+            return
+        Gdk.Display.get_default().get_clipboard().set(
+            Gdk.ContentProvider.new_for_value(address)
+        )
+
+    copy_btn.connect("clicked", copy_address)
+    btn_row.append(copy_btn)
 
     close_btn = Gtk.Button(label="Close")
     close_btn.add_css_class("btn-connect")
-    close_btn.connect("clicked", lambda _: d.close())
-    btn_box.append(close_btn)
+    close_btn.connect("clicked", lambda _: win.close())
+    btn_row.append(close_btn)
 
-    root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-    root.append(toolbar)
-    root.append(btn_box)
-    d.set_child(root)
-    d.present(parent_win)
+    root.append(btn_row)
+    win.set_content(root)
+    win.present()

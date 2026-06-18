@@ -280,6 +280,27 @@ class Connector:
             d.present()
         GLib.idle_add(show)
 
+    def _open_mod_progress(self, queue, sizes, server, mod_names, name, launch, password):
+        """Create the mod progress UI and start the download worker (GTK main thread only)."""
+        progress = ModProgressDialog(
+            self.win,
+            f"Downloading {len(queue)} mods",
+            queue,
+            mod_names or {},
+            on_open_downloads=self._open_steam_downloads,
+        )
+        threading.Thread(
+            target=self._dl_and_finish,
+            args=(queue, sizes, server, mod_names, name, launch, password, progress),
+            daemon=True,
+        ).start()
+
+    def _schedule_mod_download(self, queue, sizes, server, mod_names, name, launch, password):
+        def run():
+            self._open_mod_progress(queue, sizes, server, mod_names, name, launch, password)
+            return False
+        GLib.idle_add(run)
+
     def _missing_from_output(self, result):
         return re.findall(
             r"Subscribe the mod here: (https://\S+)",
@@ -319,18 +340,7 @@ class Connector:
             if missing:
                 self._refresh_cfg()
                 queue, sizes = self._prepare_mod_queue(missing, mod_names)
-                progress = ModProgressDialog(
-                    self.win,
-                    f"Downloading {len(queue)} mods",
-                    queue,
-                    mod_names or {},
-                    on_open_downloads=self._open_steam_downloads,
-                )
-                threading.Thread(
-                    target=self._dl_and_finish,
-                    args=(queue, sizes, server, mod_names, name, launch, password, progress),
-                    daemon=True,
-                ).start()
+                self._schedule_mod_download(queue, sizes, server, mod_names, name, launch, password)
                 return
 
         result = self._run_launcher(server, mod_ids=server_mods, launch=False, password=password)
@@ -339,18 +349,7 @@ class Connector:
             ids = [u.split("=")[-1] for u in missing_urls]
             self._refresh_cfg()
             queue, sizes = self._prepare_mod_queue(ids, mod_names)
-            progress = ModProgressDialog(
-                self.win,
-                f"Downloading {len(queue)} mods",
-                queue,
-                mod_names or {},
-                on_open_downloads=self._open_steam_downloads,
-            )
-            threading.Thread(
-                target=self._dl_and_finish,
-                args=(queue, sizes, server, mod_names, name, launch, password, progress),
-                daemon=True,
-            ).start()
+            self._schedule_mod_download(queue, sizes, server, mod_names, name, launch, password)
             return
         if result.returncode:
             err = self._launcher_error(result)
@@ -406,21 +405,17 @@ class Connector:
         d.add_response("dl", "Download & Connect" if launch else "Download Mods")
         d.set_response_appearance("dl", Adw.ResponseAppearance.SUGGESTED)
         def on_r(_, r):
-            if r == "dl":
+            if r != "dl":
+                return
+
+            def begin_download():
                 self._refresh_cfg()
                 queue, sizes = self._prepare_mod_queue(mod_ids, names)
-                progress = ModProgressDialog(
-                    self.win,
-                    f"Downloading {len(queue)} mods",
-                    queue,
-                    names,
-                    on_open_downloads=self._open_steam_downloads,
-                )
-                threading.Thread(
-                    target=self._dl_and_finish,
-                    args=(queue, sizes, server, mod_names, name, launch, password, progress),
-                    daemon=True,
-                ).start()
+                self._open_mod_progress(queue, sizes, server, mod_names, name, launch, password)
+                return False
+
+            GLib.idle_add(begin_download)
+
         d.connect("response", on_r)
         d.present()
 

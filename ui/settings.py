@@ -36,7 +36,7 @@ class SettingsView:
                 def do_detect(*_):
                     from config import detect_steam_root
                     newp = detect_steam_root()
-                    entry.set_text(newp)
+                    e.set_text(newp)
                     self.cfg[key] = newp
                     self.set_status("Steam library auto-detected.")
                 det.connect("clicked", do_detect)
@@ -54,7 +54,6 @@ class SettingsView:
         section("PATHS")
         path_row("Steam Library Root",  "steam_root",    "/mnt/Storage1tb/SteamLibrary")
         path_row("CLI Launcher Path",   "launcher_path", "bin/dayz-launcher.sh")
-        path_row("SteamCMD Path (for mod downloads)", "steamcmd_path", "leave blank for auto-detect (or run install.sh)")
         path_row("Custom Mods Folder (blank = auto)", "mods_dir", "leave blank for auto-detect")
 
         section("LAUNCH OPTIONS")
