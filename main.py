@@ -1,18 +1,42 @@
 #!/usr/bin/env python3
+import os
+import sys
+
+def _wayland_session():
+    return (
+        os.environ.get("XDG_SESSION_TYPE") == "wayland"
+        or bool(os.environ.get("WAYLAND_DISPLAY"))
+    )
+
+def _configure_display():
+    if os.environ.get("DZSL_USE_WAYLAND") == "1":
+        return
+    # On any Wayland desktop, force X11 (via XWayland). Overrides DE defaults like
+    # GDK_BACKEND=wayland,x11 and avoids compositor disconnects on COSMIC, GNOME, KDE, etc.
+    if _wayland_session() or os.environ.get("DZSL_USE_X11") == "1":
+        os.environ["GDK_BACKEND"] = "x11"
+
+_configure_display()
+
+if not os.environ.get("DISPLAY") and not os.environ.get("WAYLAND_DISPLAY"):
+    print("DZSL: no display found. Run from a graphical terminal on your desktop.", file=sys.stderr)
+    sys.exit(1)
+
 import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Gtk, Adw, GLib, Gdk
-import threading, subprocess, time
+import threading, subprocess, time, os
 
-from config import load_cfg, save_json, load_json, FAVS_FILE, RECENT_FILE
+from config import load_cfg, save_json, load_json, FAVS_FILE, RECENT_FILE, is_steam_running
 from css import CSS
-from connect import Connector
+from connect import Connector, launch_steam
 from ui.servers import ServersView
 from ui.favorites import ListView
 from ui.add_server import AddServerView
 from ui.mods import ModsView
 from ui.settings import SettingsView
+from ui.helpers import clear_box
 
 class DZSL(Adw.Application):
     def __init__(self):
@@ -20,6 +44,7 @@ class DZSL(Adw.Application):
         self.connect("activate", self.on_activate)
         self.cfg = load_cfg()
         self.favorites = load_json(FAVS_FILE)
+        self.current_view = "servers"
 
     def on_activate(self, app):
         self.win = Adw.ApplicationWindow(application=app)
@@ -29,8 +54,6 @@ class DZSL(Adw.Application):
         self.win.set_resizable(True)
         self.win.maximize()
 
-        # Set app icon
-        import os
         script_dir = os.path.dirname(os.path.abspath(__file__))
         icon_path = os.path.join(script_dir, "assets", "icon.png")
         if os.path.exists(icon_path):
@@ -49,87 +72,169 @@ class DZSL(Adw.Application):
 
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
 
-        # Native header bar
         header_bar = Adw.HeaderBar()
         header_bar.add_css_class("app-header")
         header_bar.set_show_end_title_buttons(True)
 
-        tbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        t = Gtk.Label(label="DZSL"); t.add_css_class("app-title")
-        s = Gtk.Label(label="DAYZ SERVER LIST FOR LINUX"); s.add_css_class("app-sub")
-        tbox.append(t); tbox.append(s)
-        header_bar.set_title_widget(tbox)
+        title = Gtk.Label(label="DZSL")
+        title.add_css_class("app-title")
+        header_bar.set_title_widget(title)
+
+        self.header_btns = {}
+        end_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        for key, label in [
+            ("favorites", "favorites"),
+            ("recent", "recent"),
+            ("mods", "mods"),
+            ("add", "add server"),
+            ("settings", "settings"),
+        ]:
+            b = Gtk.Button(label=label)
+            b.add_css_class("header-link")
+            b.connect("clicked", lambda _, k=key: self.show_view(k))
+            self.header_btns[key] = b
+            end_box.append(b)
+        header_bar.pack_end(end_box)
+
+        home_btn = Gtk.Button(label="servers")
+        home_btn.add_css_class("header-link")
+        home_btn.connect("clicked", lambda _: self.show_view("servers"))
+        self.header_btns["servers"] = home_btn
+        header_bar.pack_start(home_btn)
 
         root.append(header_bar)
 
-        # Body
-        body = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
-        body.set_vexpand(True)
-
-        # Sidebar
-        sb = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        sb.add_css_class("sidebar")
-
-        self.nav_btns = {}
-
-        def nav_lbl(txt):
-            l = Gtk.Label(label=txt); l.add_css_class("nav-section"); l.set_halign(Gtk.Align.START); sb.append(l)
-
-        def nav_btn(key, label):
-            b = Gtk.Button(label=label); b.add_css_class("nav-btn")
-            b.connect("clicked", lambda _: self.show_view(key))
-            self.nav_btns[key] = b; sb.append(b)
-
-        nav_lbl("LIBRARY")
-        nav_btn("favorites", "Favorites")
-        nav_btn("recent",    "Recent")
-        nav_lbl("BROWSE")
-        nav_btn("servers",   "All Servers")
-        nav_btn("add",       "+ Add Server")
-        nav_lbl("MANAGE")
-        nav_btn("mods",      "Mods")
-        nav_btn("settings",  "Settings")
-
-        body.append(sb)
-
         self.panel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        self.panel.set_hexpand(True)
-        body.append(self.panel)
-        root.append(body)
+        self.panel.set_vexpand(True)
+        root.append(self.panel)
 
-        # Status bar
-        sbar = Gtk.Box(); sbar.add_css_class("statusbar")
+        sbar = Gtk.Box()
+        sbar.add_css_class("statusbar")
         self.status_lbl = Gtk.Label(label="Ready")
-        self.status_lbl.add_css_class("status-txt"); self.status_lbl.set_halign(Gtk.Align.START)
-        sbar.append(self.status_lbl); root.append(sbar)
+        self.status_lbl.add_css_class("status-txt")
+        self.status_lbl.set_halign(Gtk.Align.START)
+        sbar.append(self.status_lbl)
+        root.append(sbar)
 
         self.win.set_content(root)
         self.win.present()
-        self.show_view("favorites")
-        threading.Thread(target=self._startup_steam_check, daemon=True).start()
+
+        self._steam_ready = False
+        self._start_steam_enforcement()
+
+    def _idle_statuses(self):
+        return {"Ready", "Ready — start Steam to launch DayZ"}
+
+    def _update_steam_status(self):
+        if is_steam_running():
+            self.set_status("Ready")
+        else:
+            self.set_status("Ready — start Steam to launch DayZ")
+
+    def _poll_steam_status(self):
+        current = self.status_lbl.get_text()
+        if current in self._idle_statuses():
+            self._update_steam_status()
+        return True
+
+    def _start_steam_enforcement(self):
+        """On app launch, ALWAYS check if Steam is running. Block the app until it is."""
+        self._update_steam_status()
+        if is_steam_running():
+            self._steam_ready = True
+            self.show_view(self.current_view)
+            GLib.timeout_add_seconds(5, self._poll_steam_status)
+            return
+
+        # Steam not running — do not let app "work"
+        self.set_status("Steam is required to use DZSL. Starting Steam...")
+        launch_steam()
+        self._show_steam_wait_screen()
+
+        def _recheck():
+            if is_steam_running():
+                self._steam_ready = True
+                self.set_status("Ready")
+                self._hide_steam_wait_screen()
+                self.show_view(self.current_view)
+                GLib.timeout_add_seconds(5, self._poll_steam_status)
+                return False
+            self.set_status("Waiting for Steam to start...")
+            return True
+
+        GLib.timeout_add_seconds(2, _recheck)
+
+    def _show_steam_wait_screen(self):
+        self.clear_panel()
+        vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
+        vbox.set_valign(Gtk.Align.CENTER)
+        vbox.set_halign(Gtk.Align.CENTER)
+        vbox.set_margin_top(80)
+        vbox.set_margin_bottom(80)
+
+        title = Gtk.Label(label="Steam Required")
+        title.add_css_class("app-title")
+        vbox.append(title)
+
+        msg = Gtk.Label(
+            label="DZSL cannot be used unless Steam is running.\n"
+                  "Steam has been launched automatically.\n"
+                  "Please wait for Steam to start, or start it manually."
+        )
+        msg.add_css_class("empty")
+        msg.set_justify(Gtk.Justification.CENTER)
+        vbox.append(msg)
+
+        spinner = Gtk.Spinner()
+        spinner.start()
+        vbox.append(spinner)
+
+        launch_btn = Gtk.Button(label="Launch Steam")
+        launch_btn.connect("clicked", lambda _: launch_steam())
+        vbox.append(launch_btn)
+
+        check_btn = Gtk.Button(label="Check Again")
+        check_btn.connect("clicked", lambda _: self._manual_steam_check())
+        vbox.append(check_btn)
+
+        self.panel.append(vbox)
+
+        # Disable header navigation while waiting for Steam
+        for b in self.header_btns.values():
+            b.set_sensitive(False)
+
+    def _hide_steam_wait_screen(self):
+        for b in self.header_btns.values():
+            b.set_sensitive(True)
+        self.clear_panel()
+
+    def _manual_steam_check(self):
+        if is_steam_running():
+            self._steam_ready = True
+            self.set_status("Ready")
+            self._hide_steam_wait_screen()
+            self.show_view(self.current_view)
+        else:
+            self.set_status("Steam still not detected — launching...")
+            launch_steam()
 
     def set_status(self, msg):
         GLib.idle_add(self.status_lbl.set_text, msg)
 
     def clear_panel(self):
-        c = self.panel.get_first_child()
-        while c:
-            n = c.get_next_sibling()
-            self.panel.remove(c)
-            c = n
+        clear_box(self.panel)
 
     def show_view(self, view):
+        if not getattr(self, "_steam_ready", False) and not is_steam_running():
+            self._show_steam_wait_screen()
+            return
+        self.current_view = view
         self.clear_panel()
-        for k, b in self.nav_btns.items():
-            if k == view:
-                b.add_css_class("active")
-            else:
-                b.remove_css_class("active")
 
         if view == "favorites":
-            ListView(self.panel, self.favorites, "No saved servers yet.\nUse Browse or Add Server.", self.favorites, self.connector.connect, self.toggle_fav, self.connector.load_mods).build()
+            ListView(self.panel, self.favorites, "No saved servers yet.\nUse the server browser or Add Server.", self.favorites, self.connector.connect, self.toggle_fav, self.connector.load_mods, self.set_status).build()
         elif view == "recent":
-            ListView(self.panel, load_json(RECENT_FILE), "No recently joined servers.", self.favorites, self.connector.connect, self.toggle_fav, self.connector.load_mods).build()
+            ListView(self.panel, load_json(RECENT_FILE), "No recently joined servers.", self.favorites, self.connector.connect, self.toggle_fav, self.connector.load_mods, self.set_status).build()
         elif view == "servers":
             ServersView(self.panel, self.cfg, self.favorites, self.connector.connect, self.toggle_fav, self.set_status, self.connector.load_mods).build()
         elif view == "add":
@@ -143,7 +248,6 @@ class DZSL(Adw.Application):
         ip   = server.get("ip") or server.get("endpoint", {}).get("ip")
         port = server.get("port") or server.get("gamePort") or server.get("gameport")
 
-        # Find existing favorite (more reliable)
         idx = None
         for i, f in enumerate(self.favorites):
             f_ip   = f.get("ip") or f.get("endpoint", {}).get("ip")
@@ -153,48 +257,21 @@ class DZSL(Adw.Application):
                 break
 
         if idx is not None:
-            # Remove
             self.favorites.pop(idx)
             if btn:
-                btn.set_label("SAVE")
+                btn.set_label("☆")
+                btn.remove_css_class("fav-star")
+                btn.add_css_class("fav-star-empty")
             self.set_status(f"Removed {server.get('name', ip)}")
         else:
-            # Add
             self.favorites.append(server)
             if btn:
-                btn.set_label("SAVED")
+                btn.set_label("★")
+                btn.remove_css_class("fav-star-empty")
+                btn.add_css_class("fav-star")
             self.set_status(f"Saved {server.get('name', ip)}")
 
         save_json(FAVS_FILE, self.favorites)
-
-    def _startup_steam_check(self):
-        is_running = subprocess.run(["pgrep", "-x", "steam"], capture_output=True).returncode == 0
-        if is_running:
-            self.set_status("Steam is running OK")
-        else:
-            GLib.idle_add(self._prompt_steam)
-
-    def _prompt_steam(self):
-        d = Adw.MessageDialog(transient_for=self.win)
-        d.set_heading("Steam is not running")
-        d.set_body("DZSL needs Steam to launch DayZ. Start Steam now?")
-        d.add_response("cancel", "Not now")
-        d.add_response("start", "Start Steam")
-        d.set_response_appearance("start", Adw.ResponseAppearance.SUGGESTED)
-        def on_r(_, r):
-            if r == "start":
-                self.set_status("Starting Steam…")
-                subprocess.Popen(["steam"])
-                def wait():
-                    for _ in range(20):
-                        time.sleep(2)
-                        if subprocess.run(["pgrep", "-x", "steam"], capture_output=True).returncode == 0:
-                            self.set_status("Steam is running OK"); return
-                    self.set_status("Steam may still be loading…")
-                threading.Thread(target=wait, daemon=True).start()
-            else:
-                self.set_status("Steam not running — connect may fail")
-        d.connect("response", on_r); d.present()
 
 if __name__ == "__main__":
     DZSL().run()

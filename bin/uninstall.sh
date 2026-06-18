@@ -1,26 +1,19 @@
 #!/bin/bash
-# DZSL Uninstaller
+set -euo pipefail
 
-echo "╔══════════════════════════════════╗"
-echo "║   DZSL Uninstaller               ║"
-echo "╚══════════════════════════════════╝"
-echo ""
+BIN_DIR="$(cd "$(dirname "$0")" && pwd)"
+INSTALL_DIR="${DZSL_INSTALL_DIR:-$HOME/DZSL}"
+CONFIG_DIR="$HOME/.config/dzsl"
+DESKTOP="$HOME/.local/share/applications/dzsl.desktop"
 
-# Remove desktop entry
-if [ -f "$HOME/.local/share/applications/dzsl.desktop" ]; then
-    rm "$HOME/.local/share/applications/dzsl.desktop"
-    echo "Removed desktop shortcut."
+_resolve() { readlink -f "$1" 2>/dev/null || echo "$1"; }
+if [ "$(_resolve "$INSTALL_DIR")" = "$(_resolve "$(cd "$BIN_DIR/.." && pwd)")" ]; then
+    exit 1
 fi
 
-# Ask about config/data
-read -p "Remove saved favorites and settings? [y/N] " confirm
-if [[ "$confirm" =~ ^[Yy]$ ]]; then
-    rm -rf "$HOME/.config/dzsl"
-    echo "Removed config and favorites."
-else
-    echo "Kept config and favorites at ~/.config/dzsl/"
-fi
+read -p "Uninstall DZSL? [y/N] " confirm
+[[ "$confirm" =~ ^[Yy]$ ]] || exit 0
 
-echo ""
-echo "DZSL uninstalled. You can delete the DZSL folder manually."
-echo ""
+[ -f "$DESKTOP" ] && rm "$DESKTOP"
+[ -d "$CONFIG_DIR" ] && rm -rf "$CONFIG_DIR"
+[ -d "$INSTALL_DIR" ] && rm -rf "$INSTALL_DIR"

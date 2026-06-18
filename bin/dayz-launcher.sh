@@ -234,10 +234,22 @@ query_server_api() {
   msg "Querying API for server: ${SERVER%:*}:${PORT}"
   query="$(sed -e "s/@ADDRESS@/${SERVER%:*}/" -e "s/@PORT@/${PORT}/" <<< "${API_URL}")"
   debug "Querying ${query}"
-  response="$(curl "${API_PARAMS[@]}" "${query}")"
-  debug "Parsing API response"
-  jq -e '.result.mods | select(type == "array")' >/dev/null 2>&1 <<< "${response}" || err "Missing mods data from API response"
-  jq -e '.result.mods[]' >/dev/null 2>&1 <<< "${response}" || { msg "This server is unmodded"; return; }
+  response="$(curl "${API_PARAMS[@]}" "${query}" 2>/dev/null || true)"
+  if ! jq -e '.result.mods | select(type == "array")' >/dev/null 2>&1 <<< "${response}"; then
+    if (( ${#INPUT[@]} > 0 )); then
+      msg "API query failed; using ${#INPUT[@]} mod ID(s) from command line"
+      return
+    fi
+    err "Missing mods data from API response"
+  fi
+  if ! jq -e '.result.mods[]' >/dev/null 2>&1 <<< "${response}"; then
+    if (( ${#INPUT[@]} > 0 )); then
+      msg "Server is unmodded per API; using ${#INPUT[@]} mod ID(s) from command line"
+      return
+    fi
+    msg "This server is unmodded"
+    return
+  fi
 
   INPUT+=( $(jq -r ".result.mods[] | .steamWorkshopId" <<< "${response}") )
 }

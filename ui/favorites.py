@@ -1,10 +1,14 @@
 import gi
 gi.require_version('Gtk', '4.0')
-from gi.repository import Gtk
+from gi.repository import Gtk, GLib
+import threading
 from ui.server_row import ServerRow
+from ui.helpers import clear_box
+from ping import ping_servers
 
 class ListView:
-    def __init__(self, panel, servers, empty_msg, favorites, connect_cb, fav_cb, load_mods_cb=None):
+    def __init__(self, panel, servers, empty_msg, favorites, connect_cb, fav_cb,
+                 load_mods_cb=None, set_status=None):
         self.panel      = panel
         self.servers    = servers
         self.empty_msg  = empty_msg
@@ -12,6 +16,9 @@ class ListView:
         self.connect_cb = connect_cb
         self.fav_cb     = fav_cb
         self.load_mods_cb = load_mods_cb
+        self.set_status = set_status or (lambda _msg: None)
+        self.list_box = None
+        self._ping_generation = 0
 
     def build(self):
         tb = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
@@ -26,6 +33,7 @@ class ListView:
         scroll = Gtk.ScrolledWindow(); scroll.set_vexpand(True)
         scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.list_box = box
         self._populate(box, self.servers)
 
         se.connect("changed", lambda e: self._populate(box, [
@@ -38,8 +46,7 @@ class ListView:
         scroll.set_child(box); self.panel.append(scroll)
 
     def _populate(self, box, servers):
-        c = box.get_first_child()
-        while c: n = c.get_next_sibling(); box.remove(c); c = n
+        clear_box(box)
         if not servers:
             el = Gtk.Label(label=self.empty_msg)
             el.add_css_class("empty"); el.set_justify(Gtk.Justification.CENTER)
@@ -47,4 +54,31 @@ class ListView:
             return
         for s in servers:
             is_fav = any(f.get("ip") == s.get("ip") and f.get("port") == s.get("port") for f in self.favorites)
-            box.append(ServerRow(s, self.connect_cb, self.fav_cb, is_fav, self.load_mods_cb))
+            box.append(ServerRow(
+                s, self.connect_cb, self.fav_cb, is_fav,
+                self.load_mods_cb, self.set_status,
+            ))
+        self._start_ping(servers)
+
+    def _start_ping(self, servers):
+        self._ping_generation += 1
+        generation = self._ping_generation
+        threading.Thread(
+            target=self._ping_batch,
+            args=(servers, generation),
+            daemon=True,
+        ).start()
+
+    def _ping_batch(self, servers, generation):
+        ping_servers(servers, limit=len(servers))
+        if generation == self._ping_generation:
+            GLib.idle_add(self._refresh_pings)
+
+    def _refresh_pings(self):
+        if not self.list_box:
+            return
+        row = self.list_box.get_first_child()
+        while row:
+            if hasattr(row, "update_ping"):
+                row.update_ping()
+            row = row.get_next_sibling()

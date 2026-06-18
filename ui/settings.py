@@ -2,6 +2,7 @@ import gi
 gi.require_version('Gtk', '4.0')
 from gi.repository import Gtk
 from config import DEFAULT_CFG, save_cfg
+from ui.helpers import forward_steam_uri
 import subprocess, threading
 
 class SettingsView:
@@ -29,7 +30,18 @@ class SettingsView:
             row.append(e)
             browse = Gtk.Button(label="BROWSE"); browse.add_css_class("btn-ghost")
             browse.connect("clicked", lambda b, entry=e, k=key: self._browse(entry, k))
-            row.append(browse); box.append(row); outer.append(box)
+            row.append(browse)
+            if key == "steam_root":
+                det = Gtk.Button(label="AUTO-DETECT"); det.add_css_class("btn-ghost")
+                def do_detect(*_):
+                    from config import detect_steam_root
+                    newp = detect_steam_root()
+                    entry.set_text(newp)
+                    self.cfg[key] = newp
+                    self.set_status("Steam library auto-detected.")
+                det.connect("clicked", do_detect)
+                row.append(det)
+            box.append(row); outer.append(box)
 
         def text_row(label, key, placeholder=""):
             box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4); box.add_css_class("settings-group")
@@ -42,11 +54,12 @@ class SettingsView:
         section("PATHS")
         path_row("Steam Library Root",  "steam_root",    "/mnt/Storage1tb/SteamLibrary")
         path_row("CLI Launcher Path",   "launcher_path", "bin/dayz-launcher.sh")
+        path_row("SteamCMD Path (for mod downloads)", "steamcmd_path", "leave blank for auto-detect (or run install.sh)")
         path_row("Custom Mods Folder (blank = auto)", "mods_dir", "leave blank for auto-detect")
 
         section("LAUNCH OPTIONS")
         chk_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=16); chk_box.add_css_class("settings-group")
-        for key, lbl in [("no_splash","No Splash"),("no_pause","No Pause"),("no_benchmark","No Benchmark"),("window_mode","Window Mode"),("script_debug","Script Debug"),("skip_battleye","Skip BattlEye")]:
+        for key, lbl in [("no_splash","No Splash"),("no_pause","No Pause"),("no_benchmark","No Benchmark"),("window_mode","Window Mode"),("script_debug","Script Debug"),("skip_battleye","Skip BattlEye"),("close_on_launch","Close app after launching server")]:
             cb = Gtk.CheckButton(label=lbl); cb.add_css_class("filter-check")
             cb.set_active(self.cfg.get(key, False))
             cb.connect("toggled", lambda w, k=key: self.cfg.update({k: w.get_active()}))

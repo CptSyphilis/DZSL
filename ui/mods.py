@@ -3,6 +3,7 @@ gi.require_version('Gtk', '4.0')
 from gi.repository import Gtk, GLib
 import requests, threading, subprocess, os, time
 from config import get_installed_mods, workshop_dir
+from ui.helpers import clear_box
 
 TOOLS = [
     ("830640",      "DayZ Tools",           "Official Bohemia modding tools. Required for creating mods."),
@@ -40,8 +41,7 @@ class ModsView:
         for k, b in self.tabs.items():
             if k == tab: b.add_css_class("active")
             else: b.remove_css_class("active")
-        c = self.content.get_first_child()
-        while c: n = c.get_next_sibling(); self.content.remove(c); c = n
+        clear_box(self.content)
         {"installed": self._installed, "tools": self._tools, "creators": self._creators}[tab]()
 
     def _installed(self):
@@ -56,8 +56,7 @@ class ModsView:
         self.inst_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
 
         def populate(q=""):
-            c = self.inst_box.get_first_child()
-            while c: n = c.get_next_sibling(); self.inst_box.remove(c); c = n
+            clear_box(self.inst_box)
             mods = get_installed_mods(self.cfg)
             if q: mods = [m for m in mods if q.lower() in m["name"].lower() or q in m["id"]]
             if not mods:
@@ -100,7 +99,17 @@ class ModsView:
                 if not outdated:
                     GLib.idle_add(self.set_status, "OK All mods up to date")
                 else:
-                    for mid in outdated: subprocess.Popen(["steam", f"steam://subscribe/{mid}"]); time.sleep(0.3)
+                    for mid in outdated:
+                        # force re-download by unsub, remove local, sub
+                        subprocess.Popen(["steam", f"steam://unsubscribe/{mid}"])
+                        time.sleep(0.5)
+                        wd = workshop_dir(self.cfg)
+                        p = os.path.join(wd, mid)
+                        if os.path.isdir(p):
+                            import shutil
+                            shutil.rmtree(p, ignore_errors=True)
+                        subprocess.Popen(["steam", f"steam://subscribe/{mid}"])
+                        time.sleep(0.3)
                     GLib.idle_add(self.set_status, f"Updating {len(outdated)} outdated mods")
             threading.Thread(target=_check, daemon=True).start()
 
@@ -154,8 +163,7 @@ class ModsView:
             except: pass
 
             def show():
-                c = box.get_first_child()
-                while c: n = c.get_next_sibling(); box.remove(c); c = n
+                clear_box(box)
                 if not creators:
                     el = Gtk.Label(label="No creator info found."); el.add_css_class("empty"); el.set_margin_top(60); box.append(el); return
                 for cid, mnames in creators.items():
