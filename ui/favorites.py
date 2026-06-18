@@ -4,7 +4,7 @@ from gi.repository import Gtk, GLib
 import threading
 from ui.server_row import ServerRow
 from ui.helpers import clear_box
-from ping import ping_servers
+from ui.ping import ping_servers
 
 class ListView:
     def __init__(self, panel, servers, empty_msg, favorites, connect_cb, fav_cb,

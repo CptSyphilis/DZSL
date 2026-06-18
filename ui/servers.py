@@ -11,7 +11,7 @@ from ui.helpers import (
     is_map_filter_active, is_map_header_label, SORT_OPTIONS, parse_sort_mode,
     sort_mode_for_key,
 )
-from ping import ping_servers
+from ui.ping import ping_servers
 
 API_URL = "https://dayzsalauncher.com/api/v1/launcher/servers/dayz"
 

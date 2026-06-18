@@ -166,9 +166,18 @@ write_config() {
 import json, os, sys
 
 path, steam_root, launcher_path = sys.argv[1:4]
+steamcmd = os.path.expanduser("~/.config/dzsl/steamcmd/steamcmd.sh")
+if not os.path.isfile(steamcmd):
+    for p in ("/usr/games/steamcmd", "/usr/bin/steamcmd"):
+        if os.path.isfile(p):
+            steamcmd = p
+            break
+    else:
+        steamcmd = ""
 defaults = {
     "steam_root": steam_root,
     "launcher_path": launcher_path,
+    "steamcmd_path": steamcmd,
     "mods_dir": "",
     "profile_name": "",
     "extra_args": "",
@@ -179,6 +188,7 @@ defaults = {
     "window_mode": False,
     "script_debug": False,
     "skip_battleye": False,
+    "close_on_launch": True,
 }
 existing = {}
 if os.path.isfile(path):
@@ -224,6 +234,4 @@ echo ""
 echo "Installed to: $INSTALL_DIR"
 echo "Run with:     $INSTALL_DIR/bin/dzsl.sh"
 echo "Or find DZSL in your application menu."
-echo ""
-echo "Your clone/source folder was not removed: $SOURCE_DIR"
 echo ""
