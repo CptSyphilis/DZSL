@@ -2,8 +2,8 @@ import gi
 gi.require_version('Gtk', '4.0')
 from gi.repository import Gtk, GLib
 import requests, threading, subprocess, os, time
-from config import get_installed_mods, workshop_dir
-from ui.helpers import clear_box
+from config import get_installed_mods, workshop_dirs
+from ui.helpers import clear_box, forward_steam_uri
 
 TOOLS = [
     ("830640",      "DayZ Tools",           "Official Bohemia modding tools. Required for creating mods."),
@@ -21,6 +21,20 @@ class ModsView:
         self.panel      = panel
         self.cfg        = cfg
         self.set_status = set_status
+
+    def _steam_action(self, uri, status_msg):
+        if forward_steam_uri(uri):
+            self.set_status(status_msg)
+        else:
+            self.set_status("Could not open Steam — start Steam and try again.")
+
+    def _unsub_mod(self, mid, name, btn):
+        if not forward_steam_uri(f"steam://unsubscribe/{mid}"):
+            self.set_status("Could not open Steam — start Steam and try again.")
+            return
+        self.set_status(f"Unsubscribing from {name}…")
+        btn.set_label("Done")
+        btn.set_sensitive(False)
 
     def build(self):
         tbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
@@ -69,13 +83,13 @@ class ModsView:
                 row.append(inf)
                 bb = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
                 wb = Gtk.Button(label="Workshop"); wb.add_css_class("btn-ghost")
-                wb.connect("clicked", lambda _, mid=m["id"]: subprocess.Popen(["steam", f"steam://url/CommunityFilePage/{mid}"]))
+                wb.connect("clicked", lambda _, mid=m["id"]: forward_steam_uri(f"steam://url/CommunityFilePage/{mid}"))
                 bb.append(wb)
                 upd = Gtk.Button(label="Update"); upd.add_css_class("btn-ghost")
-                upd.connect("clicked", lambda _, mid=m["id"]: [subprocess.Popen(["steam", f"steam://subscribe/{mid}"]), self.set_status(f"Updating {mid}…")])
+                upd.connect("clicked", lambda _, mid=m["id"], nm=m["name"]: self._steam_action(f"steam://subscribe/{mid}", f"Updating {nm}…"))
                 bb.append(upd)
                 db = Gtk.Button(label="Unsubscribe"); db.add_css_class("btn-danger")
-                db.connect("clicked", lambda _, mid=m["id"], btn=db: [subprocess.Popen(["steam", f"steam://unsubscribe/{mid}"]), btn.set_label("OK Done"), btn.set_sensitive(False)])
+                db.connect("clicked", lambda _, mid=m["id"], nm=m["name"], btn=db: self._unsub_mod(mid, nm, btn))
                 bb.append(db); row.append(bb); self.inst_box.append(row)
 
         def check_updates(b):
@@ -90,8 +104,11 @@ class ModsView:
                     for d in requests.post("https://api.steampowered.com/ISteamRemoteStorage/GetPublishedFileDetails/v1/", data=pd, timeout=15).json().get("response", {}).get("publishedfiledetails", []):
                         mid = str(d.get("publishedfileid", ""))
                         rt = d.get("time_updated", 0)
-                        path = os.path.join(workshop_dir(self.cfg), mid)
-                        lt = int(os.path.getmtime(path)) if os.path.isdir(path) else 0
+                        path = next(
+                            (os.path.join(wd, mid) for wd in workshop_dirs(self.cfg) if os.path.isdir(os.path.join(wd, mid))),
+                            "",
+                        )
+                        lt = int(os.path.getmtime(path)) if path else 0
                         if rt > lt: outdated.append(mid)
                 except Exception as e:
                     GLib.idle_add(self.set_status, f"Update check failed: {e}")
@@ -101,14 +118,14 @@ class ModsView:
                 else:
                     for mid in outdated:
                         # force re-download by unsub, remove local, sub
-                        subprocess.Popen(["steam", f"steam://unsubscribe/{mid}"])
+                        forward_steam_uri(f"steam://unsubscribe/{mid}")
                         time.sleep(0.5)
-                        wd = workshop_dir(self.cfg)
-                        p = os.path.join(wd, mid)
-                        if os.path.isdir(p):
-                            import shutil
-                            shutil.rmtree(p, ignore_errors=True)
-                        subprocess.Popen(["steam", f"steam://subscribe/{mid}"])
+                        for wd in workshop_dirs(self.cfg):
+                            p = os.path.join(wd, mid)
+                            if os.path.isdir(p):
+                                import shutil
+                                shutil.rmtree(p, ignore_errors=True)
+                        forward_steam_uri(f"steam://subscribe/{mid}")
                         time.sleep(0.3)
                     GLib.idle_add(self.set_status, f"Updating {len(outdated)} outdated mods")
             threading.Thread(target=_check, daemon=True).start()
@@ -119,7 +136,7 @@ class ModsView:
                 has_pbo = any(f.endswith(".pbo") for r, d, files in os.walk(m["path"]) for f in files)
                 if not has_pbo: broken.append(m["id"])
             if broken:
-                for mid in broken: subprocess.Popen(["steam", f"steam://subscribe/{mid}"]); time.sleep(0.2)
+                for mid in broken: forward_steam_uri(f"steam://subscribe/{mid}"); time.sleep(0.2)
                 self.set_status(f"Repairing {len(broken)} broken mods")
             else: self.set_status(f"OK All {len(mods)} mods verified OK")
 
@@ -140,9 +157,9 @@ class ModsView:
             row.append(inf)
             bb = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
             ib = Gtk.Button(label="Install"); ib.add_css_class("btn-connect")
-            ib.connect("clicked", lambda _, t=tid: [subprocess.Popen(["steam", f"steam://subscribe/{t}"]), self.set_status(f"Installing {t}…")])
+            ib.connect("clicked", lambda _, t=tid, nm=name: self._steam_action(f"steam://subscribe/{t}", f"Installing {nm}…"))
             wb = Gtk.Button(label="Workshop"); wb.add_css_class("btn-ghost")
-            wb.connect("clicked", lambda _, t=tid: subprocess.Popen(["steam", f"steam://url/CommunityFilePage/{t}"]))
+            wb.connect("clicked", lambda _, t=tid: forward_steam_uri(f"steam://url/CommunityFilePage/{t}"))
             bb.append(ib); bb.append(wb); row.append(bb); box.append(row)
         scroll.set_child(box); self.content.append(scroll)
 
@@ -173,7 +190,7 @@ class ModsView:
                     ml = Gtk.Label(label=", ".join(mnames[:4]) + ("…" if len(mnames) > 4 else "")); ml.add_css_class("mod-id"); ml.set_halign(Gtk.Align.START); inf.append(ml)
                     row.append(inf)
                     pb = Gtk.Button(label="Profile"); pb.add_css_class("btn-ghost")
-                    pb.connect("clicked", lambda _, c=cid: subprocess.Popen(["steam", f"steam://url/SteamIDPage/{c}"]))
+                    pb.connect("clicked", lambda _, c=cid: forward_steam_uri(f"steam://url/SteamIDPage/{c}"))
                     row.append(pb); box.append(row)
             GLib.idle_add(show)
 

@@ -1,9 +1,9 @@
 import gi
 gi.require_version('Gtk', '4.0')
-from gi.repository import Gtk
+from gi.repository import Gtk, GLib
 from config import DEFAULT_CFG, save_cfg
-from ui.helpers import forward_steam_uri
-import subprocess, threading
+from ui.helpers import forward_steam_uri, unsubscribe_mod_ids
+import threading
 
 class SettingsView:
     def __init__(self, panel, cfg, set_status, reload_cb):
@@ -72,7 +72,7 @@ class SettingsView:
         section("WORKSHOP ACTIONS")
         abox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8); abox.add_css_class("settings-group")
         vb = Gtk.Button(label="VERIFY ALL STEAM WORKSHOP MODS"); vb.add_css_class("btn-ghost")
-        vb.connect("clicked", lambda b: [subprocess.Popen(["steam", "steam://validate/221100"]), self.set_status("Verifying DayZ via Steam...")])
+        vb.connect("clicked", lambda b: self._steam_action("steam://validate/221100", "Verifying DayZ via Steam..."))
         abox.append(vb)
         ub = Gtk.Button(label="UNSUBSCRIBE FROM ALL STEAM WORKSHOP MODS"); ub.add_css_class("btn-danger")
         ub.connect("clicked", lambda b: self._unsub_all())
@@ -99,12 +99,20 @@ class SettingsView:
             if folder: path = folder.get_path(); entry.set_text(path); self.cfg[key] = path
         except: pass
 
+    def _steam_action(self, uri, status_msg):
+        if forward_steam_uri(uri):
+            self.set_status(status_msg)
+        else:
+            self.set_status("Could not open Steam — start Steam and try again.")
+
     def _unsub_all(self):
         from config import get_installed_mods
-        import time
         mods = get_installed_mods(self.cfg)
+        if not mods:
+            self.set_status("No workshop mods found. Check Steam Library Root in Settings.")
+            return
         self.set_status(f"Unsubscribing from {len(mods)} mods...")
         def do():
-            for m in mods: subprocess.Popen(["steam", f"steam://unsubscribe/{m['id']}"]); time.sleep(0.3)
-            self.set_status("Unsubscribed from all mods")
+            unsubscribe_mod_ids([m["id"] for m in mods])
+            GLib.idle_add(self.set_status, f"Unsubscribed from {len(mods)} mods")
         threading.Thread(target=do, daemon=True).start()

@@ -270,20 +270,29 @@ def mod_installed(cfg, mod_id):
             return True
     return False
 
+def _mod_name_from_path(path, mid):
+    name = mid
+    meta = os.path.join(path, "meta.cpp")
+    if os.path.exists(meta):
+        try:
+            for line in open(meta, errors="ignore"):
+                if "name" in line.lower() and "=" in line:
+                    name = line.split("=")[-1].strip().strip('";\n')
+                    break
+        except OSError:
+            pass
+    return name
+
 def get_installed_mods(cfg):
-    wd = workshop_dir(cfg)
     mods = []
-    if not os.path.isdir(wd): return mods
-    for mid in sorted(os.listdir(wd)):
-        path = os.path.join(wd, mid)
-        if not os.path.isdir(path): continue
-        name = mid
-        meta = os.path.join(path, "meta.cpp")
-        if os.path.exists(meta):
-            try:
-                for line in open(meta, errors="ignore"):
-                    if "name" in line.lower() and "=" in line:
-                        name = line.split("=")[-1].strip().strip('";\n'); break
-            except: pass
-        mods.append({"id": mid, "name": name, "path": path})
+    seen = set()
+    for wd in workshop_dirs(cfg):
+        if not os.path.isdir(wd):
+            continue
+        for mid in sorted(os.listdir(wd)):
+            path = os.path.join(wd, mid)
+            if not os.path.isdir(path) or mid in seen:
+                continue
+            seen.add(mid)
+            mods.append({"id": mid, "name": _mod_name_from_path(path, mid), "path": path})
     return mods

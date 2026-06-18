@@ -11,7 +11,7 @@ from config import (
 )
 
 from ui.progress import ModProgressDialog
-from ui.helpers import filter_server_mods
+from ui.helpers import filter_server_mods, forward_steam_uri
 
 def launch_steam():
     subprocess.Popen(
@@ -430,21 +430,7 @@ class Connector:
 
     def _forward_steam_uri(self, uri):
         """Send a steam:// URI to the running Steam client (never xdg-open — that opens a browser)."""
-        try:
-            subprocess.Popen(["steam", uri], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            print(f"[DZSL] steam uri -> steam: {uri}", flush=True)
-            return True
-        except OSError:
-            pass
-        try:
-            steam_bin = os.path.expanduser("~/.steam/root/ubuntu12_32/steam")
-            if os.path.isfile(steam_bin):
-                subprocess.Popen([steam_bin, uri], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                print(f"[DZSL] steam uri -> {steam_bin}: {uri}", flush=True)
-                return True
-        except OSError:
-            pass
-        return False
+        return forward_steam_uri(uri)
 
     def _mod_download_timeout(self, nbytes):
         nbytes = int(nbytes or 0)
