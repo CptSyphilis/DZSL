@@ -51,13 +51,16 @@ def popup_at_cursor(popover, widget, x, y):
 class ServerRow(Gtk.Box):
     def __init__(self, server, on_connect, on_fav, is_fav=True, on_load_mods=None,
                  set_status=None, played_lookup=None):
-        super().__init__(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.add_css_class("table-row")
         self.server = server
         self.on_connect = on_connect
         self.on_fav = on_fav
         self.on_load_mods = on_load_mods or (lambda s: None)
         self.set_status = set_status or (lambda _msg: None)
+        self.expanded = False
+
+        self.main_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
 
         ip = server.get("ip") or server.get("endpoint", {}).get("ip", "")
         port = server.get("port") or server.get("gamePort") or 2302
@@ -73,7 +76,7 @@ class ServerRow(Gtk.Box):
         fb.add_css_class("fav-star" if is_fav else "fav-star-empty")
         fb.set_size_request(36, -1)
         fb.connect("clicked", lambda b: on_fav(server, b))
-        self.append(fb)
+        self.main_row.append(fb)
 
         info = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
         info.set_hexpand(True)
@@ -98,49 +101,134 @@ class ServerRow(Gtk.Box):
         ip_lbl.add_css_class("srv-ip")
         ip_lbl.set_halign(Gtk.Align.START)
         info.append(ip_lbl)
-        self.append(info)
+        self.main_row.append(info)
 
         time_lbl = Gtk.Label(label=format_server_time(server))
         time_lbl.add_css_class("srv-time")
         time_lbl.set_size_request(72, -1)
         time_lbl.set_halign(Gtk.Align.CENTER)
-        self.append(time_lbl)
+        self.main_row.append(time_lbl)
 
         played_lbl = Gtk.Label(label=format_played(played_ts))
         played_lbl.add_css_class("srv-played")
         played_lbl.set_size_request(90, -1)
         played_lbl.set_halign(Gtk.Align.CENTER)
-        self.append(played_lbl)
+        self.main_row.append(played_lbl)
 
         map_lbl = Gtk.Label(label=normalize_map_name(server.get("map")))
         map_lbl.add_css_class("srv-detail")
         map_lbl.set_size_request(100, -1)
         map_lbl.set_halign(Gtk.Align.CENTER)
-        self.append(map_lbl)
+        self.main_row.append(map_lbl)
 
         pl_lbl = Gtk.Label(label=f"{pl}/{mxp}")
         pl_lbl.add_css_class("srv-players")
         pl_lbl.set_size_request(72, -1)
         pl_lbl.set_halign(Gtk.Align.CENTER)
-        self.append(pl_lbl)
+        self.main_row.append(pl_lbl)
 
         self.ping_lbl = Gtk.Label(label=self._ping_text(ping))
         self.ping_lbl.add_css_class(self._ping_class(ping))
         self.ping_lbl.set_size_request(52, -1)
         self.ping_lbl.set_halign(Gtk.Align.CENTER)
-        self.append(self.ping_lbl)
+        self.main_row.append(self.ping_lbl)
 
+        # Play button
         cb = Gtk.Button(label="▶")
         cb.add_css_class("btn-play")
         cb.set_size_request(44, -1)
         cb.connect("clicked", lambda b: on_connect(server))
-        self.append(cb)
+        self.main_row.append(cb)
 
-        # Right-click
+        # Info button (i)
+        info_btn = Gtk.Button(label="i")
+        info_btn.add_css_class("btn-ghost")
+        info_btn.set_size_request(28, -1)
+        info_btn.connect("clicked", lambda b: self._show_info())
+        self.main_row.append(info_btn)
+
+        self.append(self.main_row)
+
+        # Expandable details (left-click on row)
+        self.details = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        self.details.set_margin_start(40)
+        self.details.set_margin_top(8)
+        self.details.set_margin_bottom(8)
+        self.details.set_visible(False)
+        self.append(self.details)
+
+        click = Gtk.GestureClick.new()
+        click.connect("pressed", self._on_row_clicked)
+        self.main_row.add_controller(click)
+
         gesture = Gtk.GestureClick.new()
         gesture.set_button(3)
         gesture.connect("pressed", self._on_right_click)
         self.add_controller(gesture)
+
+    def _on_row_clicked(self, gesture, n_press, x, y):
+        if n_press == 1:
+            self.toggle_expand()
+
+    def toggle_expand(self):
+        self.expanded = not self.expanded
+        self.details.set_visible(self.expanded)
+        if self.expanded:
+            self.add_css_class("selected")
+            if not self.details.get_first_child():
+                self._build_details()
+        else:
+            self.remove_css_class("selected")
+
+    def _build_details(self):
+        for child in list(self.details):
+            self.details.remove(child)
+
+        be = Gtk.Label(label=f"BattlEye: {'Yes' if self.server.get('battleye', True) else 'No'}")
+        be.set_halign(Gtk.Align.START)
+        self.details.append(be)
+
+        mods = self.server.get("mods") or []
+        if mods:
+            mod_scroll = Gtk.ScrolledWindow()
+            mod_scroll.set_max_content_height(300)
+            mod_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+            mod_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+            mod_lbl = Gtk.Label(label=f"Mods ({len(mods)})")
+            mod_lbl.add_css_class("srv-detail")
+            mod_box.append(mod_lbl)
+            for m in mods:
+                name = m.get("name") or m.get("steamWorkshopId") or "Unknown"
+                mod_row = Gtk.Label(label=f"• {name}")
+                mod_row.set_halign(Gtk.Align.START)
+                mod_box.append(mod_row)
+            mod_scroll.set_child(mod_box)
+            self.details.append(mod_scroll)
+
+        extra = Gtk.Label(label=f"Version: {self.server.get('version', 'Unknown')}")
+        extra.set_halign(Gtk.Align.START)
+        self.details.append(extra)
+
+    def _show_info(self):
+        popover = Gtk.Popover.new()
+        popover.set_autohide(True)
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        box.set_margin_top(12)
+        box.set_margin_bottom(12)
+        box.set_margin_start(12)
+        box.set_margin_end(12)
+
+        # Custom server info from API
+        desc = self.server.get("description") or self.server.get("info") or self.server.get("notes") or "No additional info provided by server owner."
+        lbl = Gtk.Label(label=desc)
+        lbl.set_wrap(True)
+        lbl.set_max_width_chars(60)
+        lbl.set_halign(Gtk.Align.START)
+        box.append(lbl)
+
+        popover.set_child(box)
+        popup_at_cursor(popover, self, 0, 0)
 
     def _ping_text(self, ping):
         return f"{ping}" if ping else "-"
@@ -163,7 +251,6 @@ class ServerRow(Gtk.Box):
     def _on_right_click(self, gesture, n_press, x, y):
         if n_press != 1:
             return
-
         dismiss_popover(getattr(self, "_popover", None))
         popover = Gtk.Popover.new()
         self._popover = popover

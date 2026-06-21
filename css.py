@@ -103,7 +103,14 @@ window { background: #0d0d0d; }
 .col-label { color: #222; font-size: 10px; letter-spacing: 1px; font-family: monospace; padding: 8px 6px; }
 .table-row { background: #0f0f0f; border-bottom: 1px solid #141414; padding: 8px 4px; }
 .table-row:hover { background: #141414; }
-
+.table-row.selected {
+    background: #1a1f2e;
+    border-left: 4px solid #d4b483;
+}
+.table-row.selected {
+    background: #1a1f2e;
+    border-left: 4px solid #d4b483;
+}
 /* Fav star */
 .fav-star { background: transparent; border: none; color: #d4b483; font-size: 16px; padding: 0 8px; }
 .fav-star:hover { color: #fff; }

@@ -32,7 +32,7 @@ _filter_state = {
     "sort_mode": "players_desc",
 }
 
-# Load saved filters from disk on startup
+# Load persisted filters from previous session
 try:
     saved = load_json(FILTERS_FILE)
     if isinstance(saved, dict):
@@ -150,7 +150,6 @@ class ServersView:
         right = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         right.set_hexpand(True)
 
-        # Column headers
         col_hdr = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
         col_hdr.add_css_class("col-header")
 
@@ -184,7 +183,6 @@ class ServersView:
         col_hdr.append(act_col)
         right.append(col_hdr)
 
-        # Server list
         scroll = Gtk.ScrolledWindow()
         scroll.set_vexpand(True)
         scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
@@ -202,7 +200,7 @@ class ServersView:
 
         self._setup_map_typeahead(root)
 
-        # Restore previous filter state
+        # Restore saved filter values
         if _filter_state.get("search"):
             self.search.set_text(_filter_state["search"])
         if _filter_state.get("ip_search"):
@@ -234,7 +232,191 @@ class ServersView:
         else:
             self.fetch()
 
-    # ... (all other methods stay exactly the same until _save_and_filter)
+    def _on_map_selected(self, *_args):
+        if self._suppress_map_notify:
+            _filter_state["map"] = self.f_map.get_selected()
+            return
+        self._clear_map_prefix()
+        self._schedule_map_filter()
+
+    def _schedule_map_filter(self, delay_ms=150):
+        if self._map_filter_debounce:
+            GLib.source_remove(self._map_filter_debounce)
+        self._map_filter_debounce = GLib.timeout_add(delay_ms, self._commit_map_filter)
+
+    def _commit_map_filter(self):
+        self._map_filter_debounce = None
+        _filter_state["map"] = self.f_map.get_selected()
+        self.apply_filters()
+        return False
+
+    def _select_map_index(self, idx):
+        changed = idx != self.f_map.get_selected()
+        _filter_state["map"] = idx
+        if not changed:
+            return
+        self._suppress_map_notify = True
+        self.f_map.set_selected(idx)
+        self._suppress_map_notify = False
+        self._schedule_map_filter()
+
+    def _map_matches(self):
+        labels = _filter_state.get("maps", [])
+        prefix = self._map_prefix.lower()
+        return [
+            i for i, label in enumerate(labels)
+            if i > 0 and not is_map_header_label(label)
+            and label.split(" (")[0].lower().startswith(prefix)
+        ]
+
+    def _apply_map_prefix(self, cycle=False):
+        matches = self._map_matches()
+        if not matches:
+            return
+        if cycle:
+            self._map_cycle_index = (self._map_cycle_index + 1) % len(matches)
+        else:
+            self._map_cycle_index = 0
+        self._select_map_index(matches[self._map_cycle_index])
+
+    def _clear_map_prefix(self):
+        self._map_prefix = ""
+        self._map_cycle_index = 0
+
+    def _setup_map_typeahead(self, widget):
+        ctrl = Gtk.EventControllerKey.new()
+        ctrl.connect("key-pressed", self._on_map_typeahead)
+        widget.add_controller(ctrl)
+
+    def _in_filter_panel(self, widget):
+        w = widget
+        while w:
+            if w == self.fp:
+                return True
+            w = w.get_parent()
+        return False
+
+    def _in_server_list(self, widget):
+        w = widget
+        while w:
+            if w in (self.srv_box, self.scroll):
+                return True
+            w = w.get_parent()
+        return False
+
+    def _map_typeahead_active(self, focus):
+        if not focus:
+            return self.f_map.has_focus()
+        if focus in (self.search, self.ip_search) or isinstance(focus, Gtk.Entry):
+            return False
+        if self._in_server_list(focus):
+            return False
+        if self.f_map.has_focus() or self._in_filter_panel(focus):
+            return True
+        w = focus
+        while w:
+            if isinstance(w, Gtk.Popover) and w.get_parent() == self.f_map:
+                return True
+            w = w.get_parent()
+        return False
+
+    def _on_map_typeahead(self, _ctrl, keyval, _keycode, state):
+        if state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK | Gdk.ModifierType.SUPER_MASK):
+            return Gdk.EVENT_PROPAGATE
+        root = self.panel.get_root()
+        focus = root.get_focus() if root else None
+        if not self._map_typeahead_active(focus):
+            return Gdk.EVENT_PROPAGATE
+        keyname = Gdk.keyval_name(keyval)
+        if keyname == "BackSpace":
+            self._map_prefix = self._map_prefix[:-1]
+            if not self._map_prefix:
+                self._map_cycle_index = 0
+                return Gdk.EVENT_PROPAGATE
+            self._apply_map_prefix(cycle=False)
+            return Gdk.EVENT_STOP
+        if keyname == "Escape":
+            self._clear_map_prefix()
+            return Gdk.EVENT_STOP
+        code = Gdk.keyval_to_unicode(keyval)
+        if not code:
+            return Gdk.EVENT_PROPAGATE
+        ch = chr(code).lower()
+        if not ch.isalpha():
+            return Gdk.EVENT_PROPAGATE
+        if len(self._map_prefix) == 1 and ch == self._map_prefix:
+            self._apply_map_prefix(cycle=True)
+        else:
+            self._map_prefix = (self._map_prefix + ch) if self._map_prefix else ch
+            self._apply_map_prefix(cycle=False)
+        return Gdk.EVENT_STOP
+
+    def _on_sort_selected(self, *_args):
+        if getattr(self, "_suppress_sort_notify", False):
+            return
+        sort_modes = [mode for mode, _ in SORT_OPTIONS]
+        idx = self.f_sort.get_selected()
+        if 0 <= idx < len(sort_modes):
+            self._set_sort_mode(sort_modes[idx])
+
+    def _set_sort_mode(self, mode):
+        self.sort_mode = mode
+        _filter_state["sort_mode"] = mode
+        self.sort_key, self.sort_rev = parse_sort_mode(mode)
+        _filter_state["sort_key"] = self.sort_key
+        _filter_state["sort_rev"] = self.sort_rev
+        self._update_sort_header_labels()
+        self.apply_filters()
+
+    def _update_sort_header_labels(self):
+        if not hasattr(self, "col_btns"):
+            return
+        labels = {
+            "name": "NAME", "time": "TIME", "played": "PLAYED",
+            "map": "MAP", "players": "PLAYERS", "ping": "PING",
+        }
+        for key, btn in self.col_btns.items():
+            text = labels.get(key, key.upper())
+            if key == self.sort_key:
+                text += " ▼" if self.sort_rev else " ▲"
+            btn.set_label(text)
+
+    def _sort_by(self, key):
+        if self.sort_key == key:
+            self.sort_rev = not self.sort_rev
+        else:
+            self.sort_key = key
+            self.sort_rev = True
+        _filter_state["sort_key"] = self.sort_key
+        _filter_state["sort_rev"] = self.sort_rev
+        self.sort_mode = sort_mode_for_key(self.sort_key, self.sort_rev)
+        _filter_state["sort_mode"] = self.sort_mode
+        sort_modes = [mode for mode, _ in SORT_OPTIONS]
+        if hasattr(self, "f_sort") and self.sort_mode in sort_modes:
+            self._suppress_sort_notify = True
+            self.f_sort.set_selected(sort_modes.index(self.sort_mode))
+            self._suppress_sort_notify = False
+        self._update_sort_header_labels()
+        self.apply_filters()
+
+    def _reset_filters(self, b=None):
+        _filter_state["saved_map_id"] = ""
+        self._clear_map_prefix()
+        self.search.set_text("")
+        self.ip_search.set_text("")
+        self.f_map.set_selected(0)
+        self.f_version.set_selected(0)
+        self.sort_mode = "players_desc"
+        _filter_state["sort_mode"] = self.sort_mode
+        self.sort_key, self.sort_rev = parse_sort_mode(self.sort_mode)
+        if hasattr(self, "f_sort"):
+            self._suppress_sort_notify = True
+            self.f_sort.set_selected(0)
+            self._suppress_sort_notify = False
+        for cb in self.chk.values():
+            cb.set_active(False)
+        self._update_sort_header_labels()
+        self._save_and_filter()
 
     def _save_and_filter(self):
         _filter_state["search"] = self.search.get_text()
@@ -243,14 +425,22 @@ class ServersView:
         _filter_state["version"] = self.f_version.get_selected()
         _filter_state["checks"] = {k: v.get_active() for k, v in self.chk.items()}
 
+        # Save the actual map ID (much more reliable)
+        map_idx = self.f_map.get_selected()
+        if map_idx < len(_filter_state.get("map_ids", [])):
+            _filter_state["saved_map_id"] = _filter_state["map_ids"][map_idx]
+        else:
+            _filter_state["saved_map_id"] = ""
+
         self.apply_filters()
 
-        # Save filters to disk so they persist after restart
+        # Save to disk
         try:
             save_json(FILTERS_FILE, {
                 "search": _filter_state.get("search", ""),
                 "ip_search": _filter_state.get("ip_search", ""),
                 "map": _filter_state.get("map", 0),
+                "saved_map_id": _filter_state.get("saved_map_id", ""),
                 "version": _filter_state.get("version", 0),
                 "checks": _filter_state.get("checks", {}),
                 "sort_mode": _filter_state.get("sort_mode", "players_desc"),
@@ -258,4 +448,168 @@ class ServersView:
         except Exception:
             pass
 
-    # All remaining methods (_on_map_selected, apply_filters, fetch, etc.) stay unchanged
+        def _update_map_filter(self):
+        official, community = build_map_filter_options(self.all_servers)
+        labels, ids = build_map_dropdown(official, community)
+        _filter_state["maps"] = labels
+        _filter_state["map_ids"] = ids
+
+        if hasattr(self, "f_map"):
+            self.f_map.set_model(Gtk.StringList.new(labels))
+
+            saved_id = _filter_state.get("saved_map_id")
+            if saved_id and saved_id in ids:
+                idx = ids.index(saved_id)
+                self.f_map.set_selected(idx)
+                _filter_state["map"] = idx
+            else:
+                self.f_map.set_selected(0)   # default to "Any"
+
+        if hasattr(self, "f_map"):
+            self.f_map.set_model(Gtk.StringList.new(labels))
+
+            saved_id = _filter_state.get("saved_map_id")
+            if saved_id and saved_id in ids:
+                idx = ids.index(saved_id)
+                self.f_map.set_selected(idx)
+                _filter_state["map"] = idx
+            else:
+                self.f_map.set_selected(0)   # default to "Any"
+    def fetch(self):
+        if self._fetching:
+            return
+        self._fetching = True
+        GLib.idle_add(self._set_refresh_enabled, False)
+        self.set_status("Fetching server list...")
+        threading.Thread(target=self._fetch_thread, daemon=True).start()
+
+    def _set_refresh_enabled(self, enabled):
+        if getattr(self, "refresh_btn", None):
+            self.refresh_btn.set_sensitive(enabled)
+
+    def _fetch_done(self, error_msg=None):
+        self._fetching = False
+        self._set_refresh_enabled(True)
+        if error_msg:
+            self.set_status(error_msg)
+
+    def _fetch_thread(self):
+        try:
+            r = requests.get(API_URL, headers={"User-Agent": "DZSL/1.0"}, timeout=20)
+            data = r.json()
+            self.all_servers = data if isinstance(data, list) else data.get("result", data.get("servers", data.get("data", [])))
+            _filter_state["servers"] = self.all_servers
+            GLib.idle_add(self._update_version_filter)
+            GLib.idle_add(self._update_map_filter)
+            GLib.idle_add(self.apply_filters)
+            GLib.idle_add(self._fetch_done)
+        except Exception as e:
+            GLib.idle_add(self._fetch_done, f"Failed to load servers: {e}")
+
+    def apply_filters(self):
+        q = self.search.get_text().lower() if hasattr(self, "search") else ""
+        iq = self.ip_search.get_text().strip() if hasattr(self, "ip_search") else ""
+        mi = self.f_map.get_selected()
+        vi = self.f_version.get_selected() if hasattr(self, "f_version") else 0
+        fav_ips = {server_key(f) for f in self.favorites}
+        played_lookup = recent_map()
+        played_ips = set(played_lookup.keys())
+        versions = _filter_state.get("versions", ["Any"])
+        out = []
+        for s in self.all_servers:
+            nm = s.get("name", "").lower()
+            mp = s.get("map", "").lower()
+            pl = s.get("players", 0)
+            mod = bool(s.get("mods")) or s.get("modded", False)
+            fpp = s.get("firstPersonOnly") or s.get("firstperson", False)
+            pw = s.get("password") or s.get("hasPassword", False)
+            ip = s.get("ip") or s.get("endpoint", {}).get("ip", "")
+            port = s.get("port") or s.get("gamePort") or s.get("endpoint", {}).get("port", 0)
+            key = (ip, port)
+            is_fav = key in fav_ips
+            if q and q not in nm and q not in mp:
+                continue
+            if iq and iq not in ip:
+                continue
+            if mi > 0:
+                map_ids = _filter_state.get("map_ids", [])
+                if mi < len(map_ids):
+                    mid = map_ids[mi]
+                    if is_map_filter_active(mid) and mp != mid:
+                        continue
+            if vi > 0 and vi < len(versions):
+                if not s.get("version", "").startswith(versions[vi]):
+                    continue
+            if self.chk["favonly"].get_active() and not is_fav:
+                continue
+            if self.chk["noplayed"].get_active() and key in played_ips:
+                continue
+            if self.chk["nopass"].get_active() and pw:
+                continue
+            if self.chk["nomodded"].get_active() and mod:
+                continue
+            if self.chk["firstperson"].get_active() and not fpp:
+                continue
+            if self.chk["thirdperson"].get_active() and fpp:
+                continue
+            if self.chk["online"].get_active() and pl == 0:
+                continue
+            out.append(s)
+
+        self.sort_key, self.sort_rev = parse_sort_mode(self.sort_mode)
+
+        def sort_val(s):
+            if self.sort_key == "name":
+                return s.get("name", "").lower()
+            if self.sort_key == "map":
+                return normalize_map_name(s.get("map")).lower()
+            if self.sort_key == "players":
+                return s.get("players", 0)
+            if self.sort_key == "ping":
+                return s.get("ping") if s.get("ping") is not None else 9999
+            if self.sort_key == "time":
+                return s.get("time") or ""
+            if self.sort_key == "played":
+                return played_lookup.get(server_key(s), 0)
+            if self.sort_key == "version":
+                return s.get("version") or ""
+            return 0
+
+        out.sort(key=sort_val, reverse=self.sort_rev)
+        visible = out[:500]
+        clear_box(self.srv_box)
+        if not visible:
+            el = Gtk.Label(label="No servers match your filters.")
+            el.add_css_class("empty")
+            el.set_margin_top(60)
+            self.srv_box.append(el)
+        else:
+            for s in visible:
+                ip = s.get("ip") or s.get("endpoint", {}).get("ip", "")
+                port = s.get("port") or s.get("gamePort") or s.get("endpoint", {}).get("port", 0)
+                self.srv_box.append(ServerRow(
+                    s, self.connect_cb, self.fav_cb, (ip, port) in fav_ips,
+                    self.load_mods_cb, self.set_status, played_lookup=played_lookup))
+        self.set_status(f"Showing {len(visible):,} of {len(self.all_servers):,} servers")
+        self._start_ping(visible[:80])
+
+    def _start_ping(self, servers):
+        self._ping_generation += 1
+        generation = self._ping_generation
+        threading.Thread(
+            target=self._ping_batch,
+            args=(servers, generation),
+            daemon=True,
+        ).start()
+
+    def _ping_batch(self, servers, generation):
+        ping_servers(servers)
+        if generation == self._ping_generation:
+            GLib.idle_add(self._refresh_pings)
+
+    def _refresh_pings(self):
+        row = self.srv_box.get_first_child()
+        while row:
+            if hasattr(row, "update_ping"):
+                row.update_ping()
+            row = row.get_next_sibling()
