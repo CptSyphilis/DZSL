@@ -3,6 +3,7 @@ import os, json, re, subprocess
 CONFIG_FILE = os.path.expanduser("~/.config/dzsl/config.json")
 FAVS_FILE   = os.path.expanduser("~/.config/dzsl/favorites.json")
 RECENT_FILE = os.path.expanduser("~/.config/dzsl/recent.json")
+FILTERS_FILE = os.path.expanduser("~/.config/dzsl/filters.json")
 
 os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
 
