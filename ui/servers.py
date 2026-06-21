@@ -448,7 +448,7 @@ class ServersView:
         except Exception:
             pass
 
-        def _update_map_filter(self):
+    def _update_map_filter(self):
         official, community = build_map_filter_options(self.all_servers)
         labels, ids = build_map_dropdown(official, community)
         _filter_state["maps"] = labels
@@ -465,16 +465,6 @@ class ServersView:
             else:
                 self.f_map.set_selected(0)   # default to "Any"
 
-        if hasattr(self, "f_map"):
-            self.f_map.set_model(Gtk.StringList.new(labels))
-
-            saved_id = _filter_state.get("saved_map_id")
-            if saved_id and saved_id in ids:
-                idx = ids.index(saved_id)
-                self.f_map.set_selected(idx)
-                _filter_state["map"] = idx
-            else:
-                self.f_map.set_selected(0)   # default to "Any"
     def fetch(self):
         if self._fetching:
             return
