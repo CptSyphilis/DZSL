@@ -2,7 +2,7 @@ import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Gtk, Gdk, GLib, Adw, Graphene
-from ui.helpers import format_played, format_server_time, normalize_map_name, server_key, recent_map, format_server_subtitle, server_tags
+from ui.helpers import format_played, format_server_time, normalize_map_name, server_key, format_server_subtitle, server_tags
 
 def copy_text(text):
     Gdk.Display.get_default().get_clipboard().set(
@@ -50,7 +50,7 @@ def popup_at_cursor(popover, widget, x, y):
 
 class ServerRow(Gtk.Box):
     def __init__(self, server, on_connect, on_fav, is_fav=True, on_load_mods=None,
-                 set_status=None, played_lookup=None):
+                 set_status=None, played_lookup=None, expand_tracker=None):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.add_css_class("table-row")
         self.server = server
@@ -59,6 +59,9 @@ class ServerRow(Gtk.Box):
         self.on_load_mods = on_load_mods or (lambda s: None)
         self.set_status = set_status or (lambda _msg: None)
         self.expanded = False
+        # Shared single-slot list (from the parent view) tracking which row in this
+        # list is currently expanded, so opening one collapses any other.
+        self.expand_tracker = expand_tracker
 
         self.main_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
 
@@ -70,7 +73,7 @@ class ServerRow(Gtk.Box):
         ping = server.get("ping")
 
         played_lookup = played_lookup or {}
-        played_ts = played_lookup.get(server_key(server)) or recent_map().get(server_key(server))
+        played_ts = played_lookup.get(server_key(server))
 
         fb = Gtk.Button(label="★" if is_fav else "☆")
         fb.add_css_class("fav-star" if is_fav else "fav-star-empty")
@@ -140,9 +143,10 @@ class ServerRow(Gtk.Box):
         cb.connect("clicked", lambda b: on_connect(server))
         self.main_row.append(cb)
 
-        # Info button (i)
+        # Info button (i) — bright/white when the server owner has set custom info, dim otherwise
+        has_info = bool((server.get("description") or server.get("info") or server.get("notes") or "").strip())
         info_btn = Gtk.Button(label="i")
-        info_btn.add_css_class("btn-ghost")
+        info_btn.add_css_class("btn-info-active" if has_info else "btn-ghost")
         info_btn.set_size_request(28, -1)
         info_btn.connect("clicked", lambda b: self._show_info())
         self.main_row.append(info_btn)
@@ -171,14 +175,29 @@ class ServerRow(Gtk.Box):
             self.toggle_expand()
 
     def toggle_expand(self):
-        self.expanded = not self.expanded
-        self.details.set_visible(self.expanded)
         if self.expanded:
-            self.add_css_class("selected")
-            if not self.details.get_first_child():
-                self._build_details()
-        else:
-            self.remove_css_class("selected")
+            self._collapse()
+            return
+        if self.expand_tracker is not None:
+            current = self.expand_tracker[0]
+            if current is not None and current is not self:
+                current._collapse()
+            self.expand_tracker[0] = self
+        self._expand()
+
+    def _expand(self):
+        self.expanded = True
+        self.add_css_class("selected")
+        self.details.set_visible(True)
+        if not self.details.get_first_child():
+            self._build_details()
+
+    def _collapse(self):
+        self.expanded = False
+        self.remove_css_class("selected")
+        self.details.set_visible(False)
+        if self.expand_tracker is not None and self.expand_tracker[0] is self:
+            self.expand_tracker[0] = None
 
     def _build_details(self):
         for child in list(self.details):

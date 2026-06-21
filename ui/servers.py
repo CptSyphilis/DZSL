@@ -62,6 +62,8 @@ class ServersView:
         self._suppress_map_notify = False
         self._suppress_sort_notify = False
         self._map_filter_debounce = None
+        self._search_filter_debounce = None
+        self._expand_tracker = [None]  # shared accordion state for ServerRow widgets
 
     def build(self):
         root = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
@@ -218,8 +220,8 @@ class ServersView:
             if key in self.chk:
                 self.chk[key].set_active(val)
 
-        self.search.connect("changed", lambda *a: self._save_and_filter())
-        self.ip_search.connect("changed", lambda *a: self._save_and_filter())
+        self.search.connect("changed", lambda *a: self._schedule_search_filter())
+        self.ip_search.connect("changed", lambda *a: self._schedule_search_filter())
         self.f_map.connect("notify::selected", self._on_map_selected)
         self.f_version.connect("notify::selected", lambda *a: self._save_and_filter())
         self.f_sort.connect("notify::selected", self._on_sort_selected)
@@ -243,6 +245,16 @@ class ServersView:
         if self._map_filter_debounce:
             GLib.source_remove(self._map_filter_debounce)
         self._map_filter_debounce = GLib.timeout_add(delay_ms, self._commit_map_filter)
+
+    def _schedule_search_filter(self, delay_ms=300):
+        if self._search_filter_debounce:
+            GLib.source_remove(self._search_filter_debounce)
+        self._search_filter_debounce = GLib.timeout_add(delay_ms, self._commit_search_filter)
+
+    def _commit_search_filter(self):
+        self._search_filter_debounce = None
+        self._save_and_filter()
+        return False
 
     def _commit_map_filter(self):
         self._map_filter_debounce = None
@@ -448,6 +460,14 @@ class ServersView:
         except Exception:
             pass
 
+    def _update_version_filter(self):
+        versions = sorted({s.get("version", "")[:4] for s in self.all_servers if s.get("version")}, reverse=True)
+        _filter_state["versions"] = ["Any"] + versions
+        if hasattr(self, "f_version"):
+            sel = min(self.f_version.get_selected(), len(_filter_state["versions"]) - 1)
+            self.f_version.set_model(Gtk.StringList.new(_filter_state["versions"]))
+            self.f_version.set_selected(sel)
+
     def _update_map_filter(self):
         official, community = build_map_filter_options(self.all_servers)
         labels, ids = build_map_dropdown(official, community)
@@ -568,6 +588,7 @@ class ServersView:
         out.sort(key=sort_val, reverse=self.sort_rev)
         visible = out[:500]
         clear_box(self.srv_box)
+        self._expand_tracker[0] = None  # rows are being recreated, drop stale reference
         if not visible:
             el = Gtk.Label(label="No servers match your filters.")
             el.add_css_class("empty")
@@ -579,7 +600,8 @@ class ServersView:
                 port = s.get("port") or s.get("gamePort") or s.get("endpoint", {}).get("port", 0)
                 self.srv_box.append(ServerRow(
                     s, self.connect_cb, self.fav_cb, (ip, port) in fav_ips,
-                    self.load_mods_cb, self.set_status, played_lookup=played_lookup))
+                    self.load_mods_cb, self.set_status, played_lookup=played_lookup,
+                    expand_tracker=self._expand_tracker))
         self.set_status(f"Showing {len(visible):,} of {len(self.all_servers):,} servers")
         self._start_ping(visible[:80])
 

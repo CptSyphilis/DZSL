@@ -56,6 +56,9 @@ window { background: #0d0d0d; }
 .btn-ghost { background: transparent; border: 1px solid #252525; border-radius: 2px;
              color: #555; font-size: 11px; padding: 5px 10px; }
 .btn-ghost:hover { border-color: #d4b483; color: #d4b483; }
+.btn-info-active { background: transparent; border: 1px solid #fff; border-radius: 2px;
+                    color: #fff; font-size: 11px; padding: 5px 10px; }
+.btn-info-active:hover { background: #1a1a1a; border-color: #d4b483; color: #d4b483; }
 .btn-steam { background: #1b2838; border: 1px solid #2a475e; border-radius: 2px;
              color: #c7d5e0; font-size: 11px; padding: 5px 10px; }
 .btn-steam:hover { background: #2a3f56; }

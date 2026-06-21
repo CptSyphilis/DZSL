@@ -115,8 +115,10 @@ def show_server_properties(parent, server):
 
         mod_scroll = Gtk.ScrolledWindow()
         mod_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        mod_scroll.set_min_content_height(min(len(mods), 8) * 28)
-        mod_scroll.set_max_content_height(220)
+        max_h = 220
+        min_h = min(min(len(mods), 8) * 28, max_h)
+        mod_scroll.set_min_content_height(min_h)
+        mod_scroll.set_max_content_height(max_h)
 
         mod_list = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         for m in mods[:40]:

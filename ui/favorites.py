@@ -3,7 +3,7 @@ gi.require_version('Gtk', '4.0')
 from gi.repository import Gtk, GLib
 import threading
 from ui.server_row import ServerRow
-from ui.helpers import clear_box
+from ui.helpers import clear_box, recent_map
 from ui.ping import ping_servers
 
 class ListView:
@@ -19,6 +19,7 @@ class ListView:
         self.set_status = set_status or (lambda _msg: None)
         self.list_box = None
         self._ping_generation = 0
+        self._expand_tracker = [None]  # shared accordion state for ServerRow widgets
 
     def build(self):
         tb = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
@@ -47,16 +48,19 @@ class ListView:
 
     def _populate(self, box, servers):
         clear_box(box)
+        self._expand_tracker[0] = None  # rows are being recreated, drop stale reference
         if not servers:
             el = Gtk.Label(label=self.empty_msg)
             el.add_css_class("empty"); el.set_justify(Gtk.Justification.CENTER)
             el.set_margin_top(80); box.append(el)
             return
+        played_lookup = recent_map()  # computed once for the whole list, not per row
         for s in servers:
             is_fav = any(f.get("ip") == s.get("ip") and f.get("port") == s.get("port") for f in self.favorites)
             box.append(ServerRow(
                 s, self.connect_cb, self.fav_cb, is_fav,
-                self.load_mods_cb, self.set_status,
+                self.load_mods_cb, self.set_status, played_lookup=played_lookup,
+                expand_tracker=self._expand_tracker,
             ))
         self._start_ping(servers)
 
