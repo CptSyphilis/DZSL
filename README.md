@@ -2,6 +2,8 @@
 
 Native GTK4 + Libadwaita launcher for DayZ on Linux. Browse servers, manage favorites, auto-handle Workshop mods, and launch directly — no Wine, no Windows app required.
 
+Replaces the functionality of the popular Windows **DZSA Launcher** (DayZ Standalone Launcher).
+
 Replaces the functionality of the Windows [DayZ Server App](https://dayzserverapp.com/).
 
 ![License](https://img.shields.io/badge/license-MIT-blue)
