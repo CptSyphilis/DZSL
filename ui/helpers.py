@@ -267,6 +267,20 @@ def subscribed_mod_ids_from_server(server, cfg=None):
     cfg = cfg or load_cfg()
     return [mid for mid in mod_ids_from_server(server) if mod_subscribed(cfg, mid)]
 
+def raise_steam_window():
+    """Best-effort: bring the Steam client window to the front so Workshop
+    dependency prompts (e.g. "subscribe to required items?") aren't missed
+    behind other windows."""
+    try:
+        result = subprocess.run(
+            ["xdotool", "search", "--name", "^Steam$"],
+            capture_output=True, text=True, timeout=2,
+        )
+        for win_id in result.stdout.split():
+            subprocess.run(["xdotool", "windowactivate", win_id], capture_output=True, timeout=2)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+
 def forward_steam_uri(uri):
     remote = os.path.expanduser(
         "~/.steam/root/ubuntu12_32/steam-runtime/amd64/usr/bin/steam-runtime-steam-remote"
