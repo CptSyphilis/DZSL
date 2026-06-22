@@ -142,6 +142,7 @@ class ServerRow(Gtk.Box):
         cb.set_size_request(44, -1)
         cb.connect("clicked", lambda b: on_connect(server))
         self.main_row.append(cb)
+        self.play_btn = cb
 
         # Info button (i) — bright/white when the server owner has set custom info, dim otherwise
         has_info = bool((server.get("description") or server.get("info") or server.get("notes") or "").strip())
@@ -163,7 +164,7 @@ class ServerRow(Gtk.Box):
 
         click = Gtk.GestureClick.new()
         click.connect("pressed", self._on_row_clicked)
-        self.main_row.add_controller(click)
+        self.add_controller(click)
 
         gesture = Gtk.GestureClick.new()
         gesture.set_button(3)
@@ -171,8 +172,17 @@ class ServerRow(Gtk.Box):
         self.add_controller(gesture)
 
     def _on_row_clicked(self, gesture, n_press, x, y):
-        if n_press == 1:
-            self.toggle_expand()
+        if n_press != 1:
+            return
+        # Pressing anywhere on the row toggles it, except the play button —
+        # that should only launch the server, never expand/collapse.
+        target = self.pick(x, y, Gtk.PickFlags.DEFAULT)
+        w = target
+        while w is not None:
+            if w is self.play_btn:
+                return
+            w = w.get_parent()
+        self.toggle_expand()
 
     def toggle_expand(self):
         if self.expanded:

@@ -37,6 +37,10 @@ from ui.add_server import AddServerView
 from ui.mods import ModsView
 from ui.settings import SettingsView
 from ui.helpers import clear_box
+from applog import setup_logging, get_logger
+
+setup_logging()
+log = get_logger("main")
 
 class DZSL(Adw.Application):
     def __init__(self):
@@ -125,11 +129,21 @@ class DZSL(Adw.Application):
     def _idle_statuses(self):
         return {"Ready", "Ready — start Steam to launch DayZ"}
 
+    def _check_steam_running_async(self, callback):
+        """Run is_steam_running() (several subprocess calls) off the GTK main
+        thread so it can't stall the UI — fork/exec gets slow under CPU load,
+        which is exactly when DayZ is also running."""
+        def worker():
+            running = is_steam_running()
+            GLib.idle_add(callback, running)
+        threading.Thread(target=worker, daemon=True).start()
+
     def _update_steam_status(self):
-        if is_steam_running():
-            self.set_status("Ready")
-        else:
-            self.set_status("Ready — start Steam to launch DayZ")
+        self._check_steam_running_async(
+            lambda running: self.set_status(
+                "Ready" if running else "Ready — start Steam to launch DayZ"
+            )
+        )
 
     def _poll_steam_status(self):
         current = self.status_lbl.get_text()
@@ -139,9 +153,12 @@ class DZSL(Adw.Application):
 
     def _start_steam_enforcement(self):
         """On app launch, ALWAYS check if Steam is running. Block the app until it is."""
-        self._update_steam_status()
-        if is_steam_running():
+        self._check_steam_running_async(self._on_initial_steam_check)
+
+    def _on_initial_steam_check(self, running):
+        if running:
             self._steam_ready = True
+            self.set_status("Ready")
             self.show_view(self.current_view)
             GLib.timeout_add_seconds(5, self._poll_steam_status)
             return
@@ -150,17 +167,24 @@ class DZSL(Adw.Application):
         self.set_status("Steam is required to use DZSL. Starting Steam...")
         launch_steam()
         self._show_steam_wait_screen()
+        self._recheck_source = GLib.timeout_add_seconds(2, self._recheck_tick)
 
-        def _recheck():
-            if is_steam_running():
-                self._steam_ready = True
-                self.set_status("Ready")
-                self._hide_steam_wait_screen()
-                self.show_view(self.current_view)
-                GLib.timeout_add_seconds(5, self._poll_steam_status)
-                return False
+    def _recheck_tick(self):
+        self._check_steam_running_async(self._on_recheck_result)
+        return True
+
+    def _on_recheck_result(self, running):
+        if running:
+            self._steam_ready = True
+            self.set_status("Ready")
+            self._hide_steam_wait_screen()
+            self.show_view(self.current_view)
+            if getattr(self, "_recheck_source", None):
+                GLib.source_remove(self._recheck_source)
+                self._recheck_source = None
+            GLib.timeout_add_seconds(5, self._poll_steam_status)
+        else:
             self.set_status("Waiting for Steam to start...")
-            return True
 
         GLib.timeout_add_seconds(2, _recheck)
 
@@ -228,6 +252,7 @@ class DZSL(Adw.Application):
         if not getattr(self, "_steam_ready", False) and not is_steam_running():
             self._show_steam_wait_screen()
             return
+        log.info("View switched to %s", view)
         self.current_view = view
         self.clear_panel()
 

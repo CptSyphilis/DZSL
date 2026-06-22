@@ -11,6 +11,9 @@ from config import (
 
 from ui.progress import ModProgressDialog
 from ui.helpers import filter_server_mods, forward_steam_uri, notify_check_steam
+from applog import get_logger
+
+log = get_logger("connect")
 
 def launch_steam():
     subprocess.Popen(
@@ -26,6 +29,8 @@ class Connector:
         self.cfg        = cfg
         self.win        = win
         self.set_status = set_status
+        self._busy = False
+        self._download_scheduled = False
 
     def _refresh_cfg(self):
         self.cfg = load_cfg()
@@ -128,18 +133,32 @@ class Connector:
         return names
 
     def _start(self, server, launch=True, password=None):
+        if self._busy:
+            log.info("Ignoring connect/load-mods click — already busy")
+            self.set_status("Already connecting/loading mods — please wait…")
+            return
+        self._busy = True
+        self._download_scheduled = False
         ip = self._server_ip(server)
         port = self._game_port(server)
         name = server.get("name", f"{ip}:{port}")
         if launch:
             self._save_recent(server)
         verb = "Connecting to" if launch else "Loading mods for"
+        log.info("%s %s (%s:%s)", verb, name, ip, port)
         self.set_status(f"{verb} {name}…")
         threading.Thread(
-            target=self._thread,
+            target=self._thread_wrapper,
             args=(server, launch, password),
             daemon=True,
         ).start()
+
+    def _thread_wrapper(self, server, launch, password):
+        try:
+            self._thread(server, launch, password)
+        finally:
+            if not self._download_scheduled:
+                self._busy = False
 
     def is_steam_running(self):
         return subprocess.run(["pgrep", "-x", "steam"], capture_output=True).returncode == 0
@@ -295,6 +314,7 @@ class Connector:
         ).start()
 
     def _schedule_mod_download(self, queue, sizes, server, mod_names, name, launch, password):
+        self._download_scheduled = True
         def run():
             self._open_mod_progress(queue, sizes, server, mod_names, name, launch, password)
             return False
@@ -352,6 +372,7 @@ class Connector:
             return
         if result.returncode:
             err = self._launcher_error(result)
+            log.error("Mod setup failed for %s: %s", name, err)
             self.set_status(f"Failed to set up mods — {err}")
             self._show_error("Could not set up mods", err or "The launcher script failed.")
             return
@@ -367,9 +388,11 @@ class Connector:
             )
             if launch_result.returncode:
                 err = self._launcher_error(launch_result)
+                log.error("DayZ launch failed for %s: %s", name, err)
                 self.set_status(f"Failed to launch DayZ — {err}")
                 self._show_error("Could not launch DayZ", err or "The launcher script failed.")
             else:
+                log.info("Launched DayZ — %s", name)
                 self.set_status(f"Launched DayZ — {name}")
                 GLib.idle_add(self._close_app)
         else:
@@ -445,11 +468,20 @@ class Connector:
         mid = str(mod_id)
         if mod_installed(self.cfg, mid):
             return
-        print(f"[DZSL] Steam subscribe: {mod_name} ({mid})", flush=True)
+        log.info("Steam subscribe: %s (%s)", mod_name, mid)
         self._forward_steam_uri(f"steam://subscribe/{mid}")
         time.sleep(0.3)
         self._forward_steam_uri(f"steam://installworkshop/{DAYZ_APPID}/{mid}")
         time.sleep(1)
+
+    def _open_workshop_page(self, mod_id, mod_name):
+        """Fallback when steam://subscribe and steam://installworkshop are silently
+        dropped (observed on current Steam clients — neither verb shows up in
+        Steam's own logs). steam://url/CommunityFilePage/ still works and opens the
+        item's Workshop page so the user can click Subscribe manually."""
+        mid = str(mod_id)
+        log.warning("Auto-subscribe unresponsive for %s (%s) — opening Workshop page for manual subscribe", mod_name, mid)
+        self._forward_steam_uri(f"steam://url/CommunityFilePage/{mid}")
 
     def _sync_steam_subscriptions(self, mod_ids, start_if_needed=True):
         if not mod_ids:
@@ -479,46 +511,78 @@ class Connector:
         names = mod_names or {}
         done = 0
         total = len(mod_ids)
+        log.info("Need %d mod(s): %s", total, ", ".join(names.get(str(m), str(m)) for m in mod_ids))
         if any(not mod_installed(self.cfg, str(m)) for m in mod_ids):
             notify_check_steam()
-        for mid in mod_ids:
+        for idx, mid in enumerate(mod_ids, start=1):
             if progress and progress.is_cancelled():
+                log.info("Mod download cancelled before [%d/%d]", idx, total)
                 return False, "cancelled"
             mid = str(mid)
             mod_name = names.get(mid, mid)
             if mod_installed(self.cfg, mid):
+                log.info("[%d/%d] Already installed: %s", idx, total, mod_name)
                 self._mark_mod_progress(progress, mid)
                 done += 1
                 if progress:
                     progress.set_download_progress(done, total)
                 continue
+            log.info("[%d/%d] Subscribing: %s (%s)", idx, total, mod_name, mid)
             self.set_status(f"Subscribing to {mod_name}…")
             if progress:
                 progress.set_action_prompt(f"Subscribing via Steam:\n{mod_name}")
+                progress.clear_continue()
             self._subscribe_mod_steam(mid, mod_name)
             if not self._wait_for_mod_installed(mid, progress, mod_name):
+                log.error("[%d/%d] Gave up waiting for %s (%s) after 10 minutes", idx, total, mod_name, mid)
                 return False, f"Timeout waiting for {mod_name}"
             self._mark_mod_progress(progress, mid)
             done += 1
             if progress:
                 progress.set_download_progress(done, total)
-            print(f"[DZSL] Done with: {mod_name}", flush=True)
+            log.info("[%d/%d] Done with: %s", idx, total, mod_name)
         return True, ""
 
     def _wait_for_mod_installed(self, mod_id, progress, mod_name, size_bytes=0):
         mid = str(mod_id)
         self.set_status(f"Waiting for {mod_name} download…")
-        for _ in range(120):  # 10 minutes
+        start = time.time()
+        step = 2
+        steps = 600 // step  # 10 minutes
+        fallback_opened = False
+        for i in range(steps):
             if progress and progress.is_cancelled():
+                log.info("Wait for %s cancelled after %ds", mod_name, int(time.time() - start))
                 return False
             self._refresh_cfg()
             if mod_installed(self.cfg, mid):
+                log.info("%s installed after %ds", mod_name, int(time.time() - start))
                 return True
-            done = sum(1 for m in [mod_id] if mod_installed(self.cfg, m))  # simplistic
+            elapsed = i * step
+            opened_fallback_now = False
+            if not fallback_opened and elapsed >= 10 and not mod_subscribed(self.cfg, mid):
+                # Steam gave no sign of life (not even a subscription) within 10s —
+                # subscribe/installworkshop URIs are silently dropped by current
+                # Steam clients, so fall back to the Workshop page for a manual click.
+                fallback_opened = True
+                opened_fallback_now = True
+                self._open_workshop_page(mid, mod_name)
+                notify_check_steam()
+            elif elapsed and elapsed % 30 == 0:  # keep retrying in case Steam fixes the verbs
+                log.warning("No progress on %s after %ds, resending subscribe URI", mod_name, elapsed)
+                self._forward_steam_uri(f"steam://subscribe/{mid}")
+                time.sleep(0.3)
+                self._forward_steam_uri(f"steam://installworkshop/{DAYZ_APPID}/{mid}")
             if progress:
-                progress.set_action_prompt(f"Waiting for download: {mod_name}")
-            time.sleep(5)
-        return mod_installed(self.cfg, mid)
+                if opened_fallback_now:
+                    progress.set_action_prompt(f"Click Subscribe in Steam for:\n{mod_name}")
+                else:
+                    progress.set_action_prompt(f"Waiting for download: {mod_name}")
+            time.sleep(step)
+        ok = mod_installed(self.cfg, mid)
+        if not ok:
+            log.error("Timed out waiting for %s after %ds", mod_name, int(time.time() - start))
+        return ok
 
     def _format_size(self, nbytes):
         nbytes = int(nbytes or 0)
@@ -564,7 +628,7 @@ class Connector:
                 if mid:
                     sizes[mid] = int(detail.get("file_size", 0) or 0)
         except Exception as exc:
-            print(f"[DZSL] Could not fetch mod sizes: {exc}", flush=True)
+            log.warning("Could not fetch mod sizes: %s", exc)
         return sizes
 
     def _prepare_mod_queue(self, mod_ids, mod_names=None):
@@ -575,7 +639,7 @@ class Connector:
                 f"{(mod_names or {}).get(str(m), m)} ({self._format_size(sizes.get(str(m), 0))})"
                 for m in queue[:6]
             )
-            print(f"[DZSL] Mod queue (smallest first): {order}", flush=True)
+            log.info("Mod queue (smallest first): %s", order)
         return queue, sizes
 
     def _mark_mod_progress(self, progress, mod_id):
@@ -601,9 +665,11 @@ class Connector:
                 mod_ids, names, sizes=sizes, progress=progress,
             )
             if err == "cancelled" or self._download_cancelled(progress):
+                log.info("Mod download for %s cancelled by user", name)
                 self.set_status("Download cancelled.")
                 return
             if not ok:
+                log.error("Mod download failed for %s: %s", name, err)
                 self.set_status("Mod download failed.")
                 self._show_error("Mod download failed", err or "Could not download mods.")
                 return
@@ -658,14 +724,17 @@ class Connector:
                 )
                 if launch_result.returncode:
                     err = self._launcher_error(launch_result)
+                    log.error("DayZ launch failed for %s: %s", name, err)
                     self.set_status(f"Failed to launch DayZ — {err}")
                     self._show_error("Could not launch DayZ", err or "The launcher script failed.")
                 else:
+                    log.info("Launched DayZ — %s (after mod download)", name)
                     self.set_status(f"Launched DayZ — {name}")
                     GLib.idle_add(self._close_app)
             else:
                 self.set_status(f"Mods loaded for {name}")
         finally:
+            self._busy = False
             if progress:
                 progress.close()
 
@@ -680,32 +749,27 @@ class Connector:
         save_json(RECENT_FILE, recent[:20])
 
     def _close_app(self):
-        """Hide the main window after successfully launching DayZ (if enabled),
-        then bring it back automatically once DayZ has closed."""
+        """Fully quit DZSL after successfully launching DayZ (if enabled), so its
+        background threads (Steam polling, pings) don't compete with the game for
+        CPU. A detached watcher process relaunches DZSL once DayZ has closed."""
         if not self.cfg.get("close_on_launch", True):
             return
+        dzsl_root = os.path.dirname(os.path.abspath(__file__))
+        dzsl_sh = os.path.join(dzsl_root, "bin", "dzsl.sh")
+        watcher = (
+            'for i in $(seq 1 90); do '
+            'pgrep -f DayZ_x64 >/dev/null 2>&1 && break; sleep 2; done; '
+            'while pgrep -f DayZ_x64 >/dev/null 2>&1; do sleep 3; done; '
+            f'exec "{dzsl_sh}"'
+        )
+        subprocess.Popen(
+            ["bash", "-c", watcher],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL,
+            start_new_session=True,
+        )
         if self.win:
-            self.win.set_visible(False)
-        threading.Thread(target=self._watch_for_dayz_exit, daemon=True).start()
-
-    def _watch_for_dayz_exit(self):
-        # Wait for DayZ to actually start (give it a few minutes — Steam may still
-        # be verifying/launching). If it never starts, don't leave DZSL hidden forever.
-        started = False
-        for _ in range(90):  # ~3 minutes
-            if self.is_dayz_running():
-                started = True
-                break
-            time.sleep(2)
-
-        if started:
-            while self.is_dayz_running():
-                time.sleep(3)
-
-        GLib.idle_add(self._reopen_window)
-
-    def _reopen_window(self):
-        if self.win:
-            self.win.set_visible(True)
-            self.win.present()
-        self.set_status("Ready")
+            app = self.win.get_application()
+            if app:
+                GLib.idle_add(app.quit)

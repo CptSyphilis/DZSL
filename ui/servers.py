@@ -13,6 +13,9 @@ from ui.helpers import (
     sort_mode_for_key,
 )
 from ui.ping import ping_servers
+from applog import get_logger
+
+log = get_logger("servers")
 
 API_URL = "https://dayzsalauncher.com/api/v1/launcher/servers/dayz"
 
@@ -181,7 +184,7 @@ class ServersView:
         col_hdr.append(col_btn("PING", "ping", 52))
 
         act_col = Gtk.Label(label="")
-        act_col.set_size_request(44, -1)
+        act_col.set_size_request(72, -1)  # play (44) + info (28) buttons in each row
         col_hdr.append(act_col)
         right.append(col_hdr)
 
@@ -486,7 +489,7 @@ class ServersView:
                 self.f_map.set_selected(0)   # default to "Any"
 
     def fetch(self):
-        if self._fetching:
+        if self._fetching or getattr(self, "_refresh_cooldown", False):
             return
         self._fetching = True
         GLib.idle_add(self._set_refresh_enabled, False)
@@ -499,9 +502,15 @@ class ServersView:
 
     def _fetch_done(self, error_msg=None):
         self._fetching = False
-        self._set_refresh_enabled(True)
         if error_msg:
             self.set_status(error_msg)
+        self._refresh_cooldown = True
+        GLib.timeout_add_seconds(3, self._end_refresh_cooldown)
+
+    def _end_refresh_cooldown(self):
+        self._refresh_cooldown = False
+        self._set_refresh_enabled(True)
+        return False
 
     def _fetch_thread(self):
         try:
@@ -509,11 +518,13 @@ class ServersView:
             data = r.json()
             self.all_servers = data if isinstance(data, list) else data.get("result", data.get("servers", data.get("data", [])))
             _filter_state["servers"] = self.all_servers
+            log.info("Fetched %d servers", len(self.all_servers))
             GLib.idle_add(self._update_version_filter)
             GLib.idle_add(self._update_map_filter)
             GLib.idle_add(self.apply_filters)
             GLib.idle_add(self._fetch_done)
         except Exception as e:
+            log.error("Failed to fetch server list: %s", e)
             GLib.idle_add(self._fetch_done, f"Failed to load servers: {e}")
 
     def apply_filters(self):

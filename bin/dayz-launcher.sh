@@ -1,4 +1,3 @@
-#!/usr/bin/env bash
 set -eo pipefail
 
 SELF=$(basename "$(readlink -f "${0}")")
