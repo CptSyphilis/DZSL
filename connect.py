@@ -586,40 +586,9 @@ class Connector:
             time.sleep(0.5)
 
     def _subscribe_and_wait_mods(self, mod_ids, mod_names, sizes=None, progress=None):
-        """Subscribe to needed mods (restored to original simple working logic, with steamcmd if available)."""
+        """Subscribe to needed mods via the running Steam client (always logged in).
+        steamcmd anonymous cannot download Workshop items for paid games — skip it."""
         self._refresh_cfg()
-        sc = self._steamcmd_path()
-        if sc and os.path.isfile(sc):
-            sr = self.cfg.get("steam_root") or ""
-            for mid in mod_ids:
-                if progress and progress.is_cancelled():
-                    return False, "cancelled"
-                mid = str(mid)
-                mod_name = (mod_names or {}).get(mid, mid)
-                size_bytes = (sizes or {}).get(mid, 0)
-                size_str = self._format_size(size_bytes)
-                if mod_installed(self.cfg, mid):
-                    self._mark_mod_progress(progress, mid)
-                    done = sum(1 for m in mod_ids if mod_installed(self.cfg, m))
-                    if progress:
-                        progress.set_download_progress(done, len(mod_ids))
-                    continue
-                self.set_status(f"Downloading {mod_name} ({size_str}) via steamcmd…")
-                if progress:
-                    progress.set_action_prompt(f"Downloading via steamcmd:\n{mod_name}\n({size_str})")
-                cmd = [sc, "+force_install_dir", sr, "+login", "anonymous", "+workshop_download_item", "221100", mid, "+quit"]
-                subprocess.Popen(cmd)
-                # wait for dir
-                for _ in range(120):
-                    if progress and progress.is_cancelled():
-                        return False, "cancelled"
-                    if mod_installed(self.cfg, mid):
-                        break
-                    time.sleep(5)
-                self._mark_mod_progress(progress, mid)
-                print(f"[DZSL] Done with: {mod_name}", flush=True)
-            return True, ""
-        # simple client like original
         names = mod_names or {}
         done = 0
         total = len(mod_ids)
@@ -823,7 +792,32 @@ class Connector:
         save_json(RECENT_FILE, recent[:20])
 
     def _close_app(self):
-        """Close the main window after successfully launching DayZ (if enabled)."""
-        if self.cfg.get("close_on_launch", True):
-            if self.win:
-                self.win.close()
+        """Hide the main window after successfully launching DayZ (if enabled),
+        then bring it back automatically once DayZ has closed."""
+        if not self.cfg.get("close_on_launch", True):
+            return
+        if self.win:
+            self.win.set_visible(False)
+        threading.Thread(target=self._watch_for_dayz_exit, daemon=True).start()
+
+    def _watch_for_dayz_exit(self):
+        # Wait for DayZ to actually start (give it a few minutes — Steam may still
+        # be verifying/launching). If it never starts, don't leave DZSL hidden forever.
+        started = False
+        for _ in range(90):  # ~3 minutes
+            if self.is_dayz_running():
+                started = True
+                break
+            time.sleep(2)
+
+        if started:
+            while self.is_dayz_running():
+                time.sleep(3)
+
+        GLib.idle_add(self._reopen_window)
+
+    def _reopen_window(self):
+        if self.win:
+            self.win.set_visible(True)
+            self.win.present()
+        self.set_status("Ready")
