@@ -10,7 +10,7 @@ from config import (
 )
 
 from ui.progress import ModProgressDialog
-from ui.helpers import filter_server_mods, forward_steam_uri, raise_steam_window
+from ui.helpers import filter_server_mods, forward_steam_uri, notify_check_steam
 
 def launch_steam():
     subprocess.Popen(
@@ -446,7 +446,6 @@ class Connector:
         if mod_installed(self.cfg, mid):
             return
         print(f"[DZSL] Steam subscribe: {mod_name} ({mid})", flush=True)
-        raise_steam_window()
         self._forward_steam_uri(f"steam://subscribe/{mid}")
         time.sleep(0.3)
         self._forward_steam_uri(f"steam://installworkshop/{DAYZ_APPID}/{mid}")
@@ -465,7 +464,7 @@ class Connector:
                     break
         if not self.is_steam_running():
             return
-        raise_steam_window()
+        notify_check_steam()
         for mid in mod_ids:
             mid = str(mid)
             self._forward_steam_uri(f"steam://subscribe/{mid}")
@@ -480,6 +479,8 @@ class Connector:
         names = mod_names or {}
         done = 0
         total = len(mod_ids)
+        if any(not mod_installed(self.cfg, str(m)) for m in mod_ids):
+            notify_check_steam()
         for mid in mod_ids:
             if progress and progress.is_cancelled():
                 return False, "cancelled"

@@ -267,17 +267,16 @@ def subscribed_mod_ids_from_server(server, cfg=None):
     cfg = cfg or load_cfg()
     return [mid for mid in mod_ids_from_server(server) if mod_subscribed(cfg, mid)]
 
-def raise_steam_window():
-    """Best-effort: bring the Steam client window to the front so Workshop
-    dependency prompts (e.g. "subscribe to required items?") aren't missed
-    behind other windows."""
+def notify_check_steam():
+    """Best-effort: nudge the user to check Steam for a Workshop dependency
+    prompt (e.g. "subscribe to required items?"). Wayland compositors (e.g.
+    COSMIC) don't allow one app to force-focus another app's window, so a
+    desktop notification is used instead of trying to raise Steam directly."""
     try:
-        result = subprocess.run(
-            ["xdotool", "search", "--name", "^Steam$"],
-            capture_output=True, text=True, timeout=2,
+        subprocess.run(
+            ["notify-send", "-a", "DZSL", "DZSL", "Check Steam — it may be waiting for you to confirm a Workshop subscription."],
+            capture_output=True, timeout=2,
         )
-        for win_id in result.stdout.split():
-            subprocess.run(["xdotool", "windowactivate", win_id], capture_output=True, timeout=2)
     except (OSError, subprocess.TimeoutExpired):
         pass
 
