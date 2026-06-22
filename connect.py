@@ -7,7 +7,6 @@ from gi.repository import GLib, Adw, Gtk
 from config import (
     DAYZ_APPID, mod_installed, mod_subscribed, is_steam_running,
     save_json, RECENT_FILE, load_json, load_cfg, FAVS_FILE,
-    _detect_steamcmd,
 )
 
 from ui.progress import ModProgressDialog
@@ -399,7 +398,7 @@ class Connector:
         d.set_body(
             "Missing:\n" + "\n".join(lines[:12])
             + ("\n…" if len(lines) > 12 else "")
-            + f"\n\nDZSL will download and set up mods for {action} (via steamcmd if available, or Steam client)."
+            + f"\n\nDZSL will download and set up mods for {action} via the Steam client."
         )
         d.add_response("cancel", "Cancel")
         d.add_response("dl", "Download & Connect" if launch else "Download Mods")
@@ -441,121 +440,6 @@ class Connector:
         if nbytes >= 100 * 1024 ** 2:
             return 3600
         return 900
-
-    def _steamcmd_path(self):
-        path = self.cfg.get("steamcmd_path") or ""
-        if not path or not os.path.isfile(path):
-            # fallback detection
-            path = _detect_steamcmd() or ""
-            if not path or not os.path.isfile(path):
-                bundled = os.path.expanduser("~/.config/dzsl/steamcmd/steamcmd.sh")
-                if os.path.isfile(bundled):
-                    path = bundled
-        return path if path and os.path.isfile(path) else ""
-
-    def _steamcmd_login_args(self):
-        user = (self.cfg.get("steam_username") or "").strip()
-        pwd = (self.cfg.get("steam_password") or "").strip()
-        if user and pwd:
-            return ["+login", user, pwd]
-        return ["+login", "anonymous"]
-
-    def _steamcmd_download_mod(self, mod_id, mod_name, size_bytes=0, retries=2):
-        mid = str(mod_id)
-        steamcmd = self._steamcmd_path()
-        if not steamcmd:
-            return False, "steamcmd not found"
-
-        steam_root = self.cfg.get("steam_root") or ""
-        if not steam_root or not os.path.isdir(steam_root):
-            return False, f"Steam root not found: {steam_root}"
-
-        cmd = [
-            steamcmd,
-            "+force_install_dir", steam_root,
-            *self._steamcmd_login_args(),
-            "+workshop_download_item", DAYZ_APPID, mid,
-            "+quit",
-        ]
-        print(f"[DZSL] steamcmd download: {mod_name} ({mid})", flush=True)
-        for attempt in range(max(retries, 1)):
-            if attempt:
-                print(f"[DZSL] steamcmd retry {attempt + 1} for {mod_name}", flush=True)
-                time.sleep(5)
-            try:
-                result = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    timeout=self._mod_download_timeout(size_bytes),
-                )
-            except subprocess.TimeoutExpired:
-                return False, f"Timed out downloading {mod_name}"
-            except OSError as exc:
-                return False, str(exc)
-
-            output = (result.stdout or "") + (result.stderr or "")
-            self._refresh_cfg()
-            if mod_installed(self.cfg, mid):
-                print(f"[DZSL] Downloaded: {mod_name}", flush=True)
-                return True, ""
-            if "Success. Downloaded item" in output:
-                time.sleep(1)
-                self._refresh_cfg()
-                if mod_installed(self.cfg, mid):
-                    return True, ""
-
-            last_err = ""
-            for line in output.splitlines():
-                low = line.lower()
-                if "error" in low or "failed" in low or "denied" in low:
-                    last_err = line.strip()
-                    break
-            if not last_err and result.returncode:
-                last_err = "\n".join(output.splitlines()[-3:]).strip()
-            if last_err and "no connection" not in last_err.lower():
-                return False, last_err or f"steamcmd failed for {mod_name}"
-
-        if mod_installed(self.cfg, mid):
-            return True, ""
-        return False, last_err or f"Download finished but mod folder missing for {mod_name}"
-
-    def _ensure_steamcmd(self):
-        """Ensure steamcmd is available, auto-downloading if necessary."""
-        path = self._steamcmd_path()
-        if path:
-            return path
-        steamcmd_dir = os.path.expanduser("~/.config/dzsl/steamcmd")
-        os.makedirs(steamcmd_dir, exist_ok=True)
-        steamcmd_sh = os.path.join(steamcmd_dir, "steamcmd.sh")
-        if os.path.isfile(steamcmd_sh):
-            self.cfg["steamcmd_path"] = steamcmd_sh
-            return steamcmd_sh
-        self.set_status("Installing steamcmd for mod downloads...")
-        try:
-            import urllib.request
-            import tarfile
-            import io
-            url = "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz"
-            print("[DZSL] Downloading steamcmd...", flush=True)
-            with urllib.request.urlopen(url, timeout=120) as resp:
-                data = resp.read()
-            with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tar:
-                tar.extractall(steamcmd_dir)
-            os.chmod(steamcmd_sh, 0o755)
-            self.cfg["steamcmd_path"] = steamcmd_sh
-            try:
-                from config import save_cfg
-                save_cfg(self.cfg)
-            except Exception:
-                pass
-            print(f"[DZSL] steamcmd installed to {steamcmd_sh}", flush=True)
-            self.set_status("steamcmd ready.")
-            return steamcmd_sh
-        except Exception as exc:
-            print(f"[DZSL] Auto-install steamcmd failed: {exc}", flush=True)
-            self.set_status("Could not set up steamcmd, using Steam client...")
-            return ""
 
     def _subscribe_mod_steam(self, mod_id, mod_name):
         mid = str(mod_id)
@@ -700,7 +584,6 @@ class Connector:
 
     def _dl_and_finish(self, mod_ids, sizes, server, mod_names, name, launch, password, progress):
         self._refresh_cfg()
-        self._ensure_steamcmd()
         names = mod_names or {}
         total = len(mod_ids)
 

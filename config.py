@@ -57,19 +57,9 @@ def _detect_launcher():
     script_dir = os.path.dirname(os.path.abspath(__file__))
     return os.path.join(script_dir, "bin", "dayz-launcher.sh")
 
-def _detect_steamcmd():
-    bundled = os.path.expanduser("~/.config/dzsl/steamcmd/steamcmd.sh")
-    if os.path.isfile(bundled):
-        return bundled
-    for path in ("/usr/games/steamcmd", "/usr/bin/steamcmd"):
-        if os.path.isfile(path):
-            return path
-    return ""
-
 DEFAULT_CFG = {
     "steam_root":    detect_steam_root(),
     "launcher_path": _detect_launcher(),
-    "steamcmd_path": _detect_steamcmd(),
     "mods_dir":      "",
     "profile_name":  "",
     "extra_args":    "",
