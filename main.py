@@ -121,10 +121,35 @@ class DZSL(Adw.Application):
         root.append(sbar)
 
         self.win.set_content(root)
+        self.win.connect("realize", self._on_window_realize)
         self.win.present()
 
         self._steam_ready = False
         self._start_steam_enforcement()
+
+    def _on_window_realize(self, win):
+        surface = win.get_surface()
+        if surface:
+            surface.connect("notify::state", self._on_window_state_changed)
+
+    def _on_window_state_changed(self, surface, _pspec):
+        """GTK4/XWayland sometimes leaves the window with a stale layout after a
+        minimize→restore cycle (worse if the window was moved beforehand). Nudging
+        the size by 1px and back forces GTK and the compositor to recompute the
+        allocation instead of reusing the broken one."""
+        minimized = bool(surface.get_state() & Gdk.ToplevelState.MINIMIZED)
+        if minimized:
+            self._was_minimized = True
+        elif getattr(self, "_was_minimized", False):
+            self._was_minimized = False
+            GLib.idle_add(self._fixup_size_after_restore)
+
+    def _fixup_size_after_restore(self):
+        w, h = self.win.get_width(), self.win.get_height()
+        if w and h:
+            self.win.set_default_size(w - 1, h)
+            GLib.idle_add(lambda: self.win.set_default_size(w, h))
+        return False
 
     def _idle_statuses(self):
         return {"Ready", "Ready — start Steam to launch DayZ"}

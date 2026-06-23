@@ -10,7 +10,7 @@ from config import (
 )
 
 from ui.progress import ModProgressDialog
-from ui.helpers import filter_server_mods, forward_steam_uri, notify_check_steam
+from ui.helpers import filter_server_mods, forward_steam_uri, notify_check_steam, server_key
 from applog import get_logger
 
 log = get_logger("connect")
@@ -740,36 +740,41 @@ class Connector:
 
     def _save_recent(self, server):
         recent = load_json(RECENT_FILE)
-        ip = server.get("ip") or server.get("endpoint", {}).get("ip")
-        port = server.get("port") or server.get("gamePort") or server.get("endpoint", {}).get("port")
-        recent = [r for r in recent if not (r.get("ip") == ip and r.get("port") == port)]
+        key = server_key(server)
+        recent = [r for r in recent if server_key(r) != key]
         entry = dict(server)
         entry["joined_at"] = time.time()
         recent.insert(0, entry)
         save_json(RECENT_FILE, recent[:20])
 
     def _close_app(self):
-        """Fully quit DZSL after successfully launching DayZ (if enabled), so its
-        background threads (Steam polling, pings) don't compete with the game for
-        CPU. A detached watcher process relaunches DZSL once DayZ has closed."""
+        """Hide the DZSL window after successfully launching DayZ (if enabled), so
+        it gets out of the way while the game runs. The Python process (and its
+        background threads) stays alive; a daemon watcher thread polls for DayZ
+        to start and then exit, and restores the window once DayZ has closed."""
         if not self.cfg.get("close_on_launch", True):
             return
-        dzsl_root = os.path.dirname(os.path.abspath(__file__))
-        dzsl_sh = os.path.join(dzsl_root, "bin", "dzsl.sh")
-        watcher = (
-            'for i in $(seq 1 90); do '
-            'pgrep -f DayZ_x64 >/dev/null 2>&1 && break; sleep 2; done; '
-            'while pgrep -f DayZ_x64 >/dev/null 2>&1; do sleep 3; done; '
-            f'exec "{dzsl_sh}"'
-        )
-        subprocess.Popen(
-            ["bash", "-c", watcher],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            stdin=subprocess.DEVNULL,
-            start_new_session=True,
-        )
+        if not self.win:
+            return
+        self.win.set_visible(False)
+        threading.Thread(target=self._watch_dayz_and_restore, daemon=True).start()
+
+    def _watch_dayz_and_restore(self):
+        """Runs on a background daemon thread. Waits for DayZ to appear (giving up
+        after ~3 minutes if it never does), then waits for it to exit, then asks
+        the main thread to re-show the DZSL window."""
+        started = False
+        for _ in range(90):
+            if self.is_dayz_running():
+                started = True
+                break
+            time.sleep(2)
+        if started:
+            while self.is_dayz_running():
+                time.sleep(3)
+        GLib.idle_add(self._restore_window)
+
+    def _restore_window(self):
         if self.win:
-            app = self.win.get_application()
-            if app:
-                GLib.idle_add(app.quit)
+            self.win.set_visible(True)
+            self.win.present()
