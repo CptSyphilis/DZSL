@@ -35,6 +35,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Gtk, Adw  # noqa: F401
 import requests  # noqa: F401
+import dotenv  # noqa: F401
 PY
 }
 
@@ -50,7 +51,7 @@ install_deps() {
 
     if ! command -v sudo >/dev/null; then
         echo "sudo not found. Install manually: python3, python3-gi, gir1.2-gtk-4.0,"
-        echo "gir1.2-adw-1, python3-requests, gawk, curl, jq"
+        echo "gir1.2-adw-1, python3-requests, python3-dotenv, gawk, curl, jq"
         exit 1
     fi
 
@@ -59,28 +60,28 @@ install_deps() {
             echo "Installing dependencies (apt)..."
             sudo apt update
             sudo apt install -y python3 python3-gi python3-gi-cairo \
-                gir1.2-gtk-4.0 gir1.2-adw-1 python3-requests \
+                gir1.2-gtk-4.0 gir1.2-adw-1 python3-requests python3-dotenv \
                 gawk curl jq rsync
             ;;
         fedora|rhel|centos)
             echo "Installing dependencies (dnf)..."
             sudo dnf install -y python3 python3-gobject python3-requests \
-                gtk4 libadwaita gawk curl jq rsync
+                python3-dotenv gtk4 libadwaita gawk curl jq rsync
             ;;
         arch|manjaro|endeavouros)
             echo "Installing dependencies (pacman)..."
             sudo pacman -Sy --noconfirm python python-gobject python-requests \
-                gtk4 libadwaita gawk curl jq rsync
+                python-dotenv gtk4 libadwaita gawk curl jq rsync
             ;;
         opensuse*|sles)
             echo "Installing dependencies (zypper)..."
             sudo zypper install -y python3 python3-gobject python3-requests \
-                typelib-1_0-Gtk-4_0 typelib-1_0-Adw-1 gawk curl jq rsync
+                python3-dotenv typelib-1_0-Gtk-4_0 typelib-1_0-Adw-1 gawk curl jq rsync
             ;;
         *)
             echo "Unknown distro: $DISTRO"
             echo "Install manually: python3, python3-gi, gir1.2-gtk-4.0, gir1.2-adw-1,"
-            echo "python3-requests, gawk, curl, jq, rsync"
+            echo "python3-requests, python3-dotenv, gawk, curl, jq, rsync"
             ;;
     esac
 
@@ -166,18 +167,9 @@ write_config() {
 import json, os, sys
 
 path, steam_root, launcher_path = sys.argv[1:4]
-steamcmd = os.path.expanduser("~/.config/dzsl/steamcmd/steamcmd.sh")
-if not os.path.isfile(steamcmd):
-    for p in ("/usr/games/steamcmd", "/usr/bin/steamcmd"):
-        if os.path.isfile(p):
-            steamcmd = p
-            break
-    else:
-        steamcmd = ""
 defaults = {
     "steam_root": steam_root,
     "launcher_path": launcher_path,
-    "steamcmd_path": steamcmd,
     "mods_dir": "",
     "profile_name": "",
     "extra_args": "",

@@ -21,7 +21,6 @@ class AddServerView:
 
         lbl = Gtk.Label(label="ADD SERVER"); lbl.add_css_class("settings-title"); lbl.set_halign(Gtk.Align.START); box.append(lbl)
 
-        # Direct connect from clipboard
         paste_btn = Gtk.Button(label="Paste IP from Clipboard")
         paste_btn.add_css_class("btn-ghost")
         def do_paste(b):

@@ -5,8 +5,8 @@ gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import GLib, Adw, Gtk
 from config import (
-    DAYZ_APPID, mod_installed, mod_subscribed, is_steam_running,
-    save_json, RECENT_FILE, load_json, load_cfg, FAVS_FILE,
+    DAYZ_APPID, mod_installed, mod_subscribed, mod_subscribed_per_steam_log,
+    is_steam_running, save_json, RECENT_FILE, load_json, load_cfg, FAVS_FILE,
 )
 
 from ui.progress import ModProgressDialog
@@ -16,13 +16,22 @@ from applog import get_logger
 log = get_logger("connect")
 
 def launch_steam():
-    subprocess.Popen(
+    proc = subprocess.Popen(
         ["steam"],
         stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
         stdin=subprocess.DEVNULL,
         start_new_session=True,
+        text=True,
     )
+
+    def _log_stderr():
+        for line in proc.stderr:
+            line = line.strip()
+            if line:
+                log.warning("steam: %s", line)
+
+    threading.Thread(target=_log_stderr, daemon=True).start()
 
 class Connector:
     def __init__(self, cfg, win, set_status):
@@ -331,12 +340,15 @@ class Connector:
             return True
         self.set_status("Starting Steam…")
         launch_steam()
-        for _ in range(45):
+        for i in range(90):
             time.sleep(2)
             if self.is_steam_running():
                 time.sleep(3)
                 self.set_status("Steam ready.")
                 return True
+            elapsed = (i + 1) * 2
+            if elapsed % 20 == 0:
+                self.set_status(f"Waiting for Steam to start ({elapsed}s)…")
         self.set_status("Steam did not start in time.")
         self._show_error(
             "Steam required to launch",
@@ -405,11 +417,14 @@ class Connector:
             return True
         self.set_status("Starting Steam for workshop mods…")
         launch_steam()
-        for _ in range(45):
+        for i in range(90):
             time.sleep(2)
             if self.is_steam_running():
                 time.sleep(4)
                 return True
+            elapsed = (i + 1) * 2
+            if elapsed % 20 == 0:
+                self.set_status(f"Waiting for Steam to start ({elapsed}s)…")
         return False
 
     def _show_dl_dialog(self, mod_ids, server, mod_names, name, launch, password):
@@ -505,42 +520,52 @@ class Connector:
             time.sleep(0.5)
 
     def _subscribe_and_wait_mods(self, mod_ids, mod_names, sizes=None, progress=None):
-        """Subscribe to needed mods via the running Steam client (always logged in).
-        steamcmd anonymous cannot download Workshop items for paid games — skip it."""
+        """Subscribe to needed mods via steam:// URIs + a manual Workshop-page
+        click for whatever's left (those URI verbs are silently dropped by
+        current Steam clients — see _open_workshop_page)."""
         self._refresh_cfg()
         names = mod_names or {}
-        done = 0
         total = len(mod_ids)
         log.info("Need %d mod(s): %s", total, ", ".join(names.get(str(m), str(m)) for m in mod_ids))
-        if any(not mod_installed(self.cfg, str(m)) for m in mod_ids):
-            notify_check_steam()
-        for idx, mid in enumerate(mod_ids, start=1):
-            if progress and progress.is_cancelled():
-                log.info("Mod download cancelled before [%d/%d]", idx, total)
-                return False, "cancelled"
+
+        pending = []
+        done = 0
+        for mid in mod_ids:
             mid = str(mid)
-            mod_name = names.get(mid, mid)
             if mod_installed(self.cfg, mid):
-                log.info("[%d/%d] Already installed: %s", idx, total, mod_name)
+                log.info("Already installed: %s", names.get(mid, mid))
                 self._mark_mod_progress(progress, mid)
                 done += 1
-                if progress:
-                    progress.set_download_progress(done, total)
-                continue
-            log.info("[%d/%d] Subscribing: %s (%s)", idx, total, mod_name, mid)
+            else:
+                pending.append(mid)
+        if progress:
+            progress.set_download_progress(done, total)
+        if not pending:
+            return True, ""
+        if progress and progress.is_cancelled():
+            return False, "cancelled"
+
+        notify_check_steam()
+        for idx, mid in enumerate(pending, start=1):
+            if progress and progress.is_cancelled():
+                log.info("Mod download cancelled before [%d/%d]", idx, len(pending))
+                return False, "cancelled"
+            mod_name = names.get(mid, mid)
+            log.info("[%d/%d] Subscribing: %s (%s)", idx, len(pending), mod_name, mid)
             self.set_status(f"Subscribing to {mod_name}…")
             if progress:
                 progress.set_action_prompt(f"Subscribing via Steam:\n{mod_name}")
+                progress.set_hint("")
                 progress.clear_continue()
             self._subscribe_mod_steam(mid, mod_name)
             if not self._wait_for_mod_installed(mid, progress, mod_name):
-                log.error("[%d/%d] Gave up waiting for %s (%s) after 10 minutes", idx, total, mod_name, mid)
+                log.error("[%d/%d] Gave up waiting for %s (%s) after 10 minutes", idx, len(pending), mod_name, mid)
                 return False, f"Timeout waiting for {mod_name}"
             self._mark_mod_progress(progress, mid)
             done += 1
             if progress:
                 progress.set_download_progress(done, total)
-            log.info("[%d/%d] Done with: %s", idx, total, mod_name)
+            log.info("[%d/%d] Done with: %s", idx, len(pending), mod_name)
         return True, ""
 
     def _wait_for_mod_installed(self, mod_id, progress, mod_name, size_bytes=0):
@@ -558,6 +583,21 @@ class Connector:
             if mod_installed(self.cfg, mid):
                 log.info("%s installed after %ds", mod_name, int(time.time() - start))
                 return True
+            if progress and progress.continue_requested():
+                if mod_subscribed_per_steam_log(mid):
+                    # Confirmed via Steam's own workshop_log.txt — the user really
+                    # did subscribe, not just clicked through. Stop waiting on this
+                    # one and let Steam keep downloading it in the background.
+                    # (appworkshop_*.acf, which mod_subscribed() reads, lags too far
+                    # behind the actual subscribe event to use for this check.)
+                    log.info("User advanced past %s after %ds (subscription confirmed)", mod_name, int(time.time() - start))
+                    progress.clear_continue()
+                    return True
+                # Click registered but Steam shows no subscription yet for this
+                # mod — don't trust it blindly, keep waiting and tell the user why.
+                log.warning("Next-mod click for %s ignored — not yet subscribed per Steam", mod_name)
+                progress.clear_continue()
+                progress.set_hint(f"Not subscribed yet in Steam — click Subscribe first for:\n{mod_name}")
             elapsed = i * step
             opened_fallback_now = False
             if not fallback_opened and elapsed >= 10 and not mod_subscribed(self.cfg, mid):

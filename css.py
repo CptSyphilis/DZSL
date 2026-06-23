@@ -110,10 +110,6 @@ window { background: #0d0d0d; }
     background: #1a1f2e;
     border-left: 4px solid #d4b483;
 }
-.table-row.selected {
-    background: #1a1f2e;
-    border-left: 4px solid #d4b483;
-}
 /* Fav star */
 .fav-star { background: transparent; border: none; color: #d4b483; font-size: 16px; padding: 0 8px; }
 .fav-star:hover { color: #fff; }

@@ -1,8 +1,10 @@
+import os
 import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Gtk, GLib, Gdk, Adw
 import requests, threading
+from dotenv import load_dotenv
 from config import load_json, save_json, FILTERS_FILE
 from ui.server_row import copy_text, popup_at_cursor, dismiss_popover, ServerRow
 from ui.helpers import clear_box
@@ -17,7 +19,8 @@ from applog import get_logger
 
 log = get_logger("servers")
 
-API_URL = "https://dayzsalauncher.com/api/v1/launcher/servers/dayz"
+load_dotenv(os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env"))
+API_URL = os.getenv("API_URL", "https://dayzsalauncher.com/api/v1/launcher/servers/dayz")
 
 # Persist filter state between view switches
 _filter_state = {

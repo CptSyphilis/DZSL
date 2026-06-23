@@ -42,3 +42,4 @@ Thumbs.db
 config.ini
 CLAUDE.md
 /screenshots
+.env

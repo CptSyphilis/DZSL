@@ -21,7 +21,6 @@ def transient_window(widget):
 
 
 def clear_box(box):
-    """Remove all children from a Gtk container using the first_child / sibling walk."""
     c = box.get_first_child()
     while c:
         n = c.get_next_sibling()

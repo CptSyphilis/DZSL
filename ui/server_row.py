@@ -136,7 +136,6 @@ class ServerRow(Gtk.Box):
         self.ping_lbl.set_halign(Gtk.Align.CENTER)
         self.main_row.append(self.ping_lbl)
 
-        # Play button
         cb = Gtk.Button(label="▶")
         cb.add_css_class("btn-play")
         cb.set_size_request(44, -1)
@@ -144,7 +143,6 @@ class ServerRow(Gtk.Box):
         self.main_row.append(cb)
         self.play_btn = cb
 
-        # Info button (i) — bright/white when the server owner has set custom info, dim otherwise
         has_info = bool((server.get("description") or server.get("info") or server.get("notes") or "").strip())
         info_btn = Gtk.Button(label="i")
         info_btn.add_css_class("btn-info-active" if has_info else "btn-ghost")
@@ -154,7 +152,6 @@ class ServerRow(Gtk.Box):
 
         self.append(self.main_row)
 
-        # Expandable details (left-click on row)
         self.details = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         self.details.set_margin_start(40)
         self.details.set_margin_top(8)
@@ -248,7 +245,6 @@ class ServerRow(Gtk.Box):
         box.set_margin_start(12)
         box.set_margin_end(12)
 
-        # Custom server info from API
         desc = self.server.get("description") or self.server.get("info") or self.server.get("notes") or "No additional info provided by server owner."
         lbl = Gtk.Label(label=desc)
         lbl.set_wrap(True)

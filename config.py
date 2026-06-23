@@ -43,9 +43,9 @@ def detect_steam_root():
                     libs.append(p)
         except Exception:
             pass
-    # Prefer a lib that actually contains the DayZ game
+    # Prefer a lib that actually has DayZ installed
     for p in libs:
-        if os.path.isdir(os.path.join(p, "steamapps", "common", "DayZ")):
+        if os.path.isfile(os.path.join(p, "steamapps", "appmanifest_221100.acf")):
             return p
     # Fallback: first one that looks like a Steam library (has steamapps)
     for p in libs:
@@ -253,6 +253,15 @@ def subscribed_mods(cfg):
 
 def mod_subscribed(cfg, mod_id):
     return str(mod_id) in subscribed_mods(cfg)
+
+WORKSHOP_LOG_FILE = os.path.expanduser("~/.local/share/Steam/logs/workshop_log.txt")
+
+def mod_subscribed_per_steam_log(mod_id):
+    try:
+        text = open(WORKSHOP_LOG_FILE, errors="ignore").read()
+    except OSError:
+        return False
+    return f"Subscribed to item {mod_id}" in text
 
 def mod_installed(cfg, mod_id):
     mid = str(mod_id)
