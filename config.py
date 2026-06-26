@@ -43,9 +43,15 @@ def detect_steam_root():
                     libs.append(p)
         except Exception:
             pass
-    # Prefer a lib that actually has DayZ installed
+    # Prefer a lib that has both the manifest and the actual game files
     for p in libs:
-        if os.path.isfile(os.path.join(p, "steamapps", "appmanifest_221100.acf")):
+        if (os.path.isfile(os.path.join(p, "steamapps", "appmanifest_221100.acf"))
+                and os.path.isdir(os.path.join(p, "steamapps", "common", "DayZ"))):
+            return p
+    # Next: a lib with either signal (interrupted install / stale manifest)
+    for p in libs:
+        if (os.path.isfile(os.path.join(p, "steamapps", "appmanifest_221100.acf"))
+                or os.path.isdir(os.path.join(p, "steamapps", "common", "DayZ"))):
             return p
     # Fallback: first one that looks like a Steam library (has steamapps)
     for p in libs:
@@ -71,6 +77,8 @@ DEFAULT_CFG = {
     "script_debug":  False,
     "skip_battleye": False,
     "close_on_launch": True,
+    "download_max_chunks": 8,
+    "download_speed_kbps": 0,
 }
 
 def load_cfg():
@@ -254,21 +262,63 @@ def subscribed_mods(cfg):
 def mod_subscribed(cfg, mod_id):
     return str(mod_id) in subscribed_mods(cfg)
 
-WORKSHOP_LOG_FILE = os.path.expanduser("~/.local/share/Steam/logs/workshop_log.txt")
+WORKSHOP_LOG_CANDIDATES = [
+    os.path.expanduser("~/.local/share/Steam/logs/workshop_log.txt"),
+    os.path.expanduser("~/.steam/steam/logs/workshop_log.txt"),
+    os.path.expanduser("~/.var/app/com.valvesoftware.Steam/data/Steam/logs/workshop_log.txt"),
+]
 
 def mod_subscribed_per_steam_log(mod_id):
-    try:
-        text = open(WORKSHOP_LOG_FILE, errors="ignore").read()
-    except OSError:
-        return False
-    return f"Subscribed to item {mod_id}" in text
+    needle = f"Subscribed to item {mod_id}"
+    for path in WORKSHOP_LOG_CANDIDATES:
+        try:
+            if needle in open(path, errors="ignore").read():
+                return True
+        except OSError:
+            continue
+    return False
 
 def mod_installed(cfg, mod_id):
     mid = str(mod_id)
     for wd in workshop_dirs(cfg):
-        if os.path.isdir(os.path.join(wd, mid)):
-            return True
+        path = os.path.join(wd, mid)
+        if not os.path.isdir(path):
+            continue
+        meta = os.path.join(path, "meta.cpp")
+        if os.path.isfile(meta) and os.path.getsize(meta) > 0:
+            try:
+                if open(meta, "rb").read(4) != b"\x00\x00\x00\x00":
+                    return True
+            except OSError:
+                pass
+        elif not os.path.isfile(meta):
+            entries = [e for e in os.listdir(path) if not e.startswith(".")]
+            if entries:
+                return True
     return False
+
+def find_corrupt_mods(cfg):
+    corrupt = []
+    for wd in workshop_dirs(cfg):
+        if not os.path.isdir(wd):
+            continue
+        for mid in os.listdir(wd):
+            path = os.path.join(wd, mid)
+            if not os.path.isdir(path) or not mid.isdigit():
+                continue
+            meta = os.path.join(path, "meta.cpp")
+            if os.path.isfile(meta):
+                try:
+                    data = open(meta, "rb").read(4)
+                    if data == b"\x00\x00\x00\x00" or len(data) == 0:
+                        corrupt.append(path)
+                except OSError:
+                    corrupt.append(path)
+            else:
+                entries = [e for e in os.listdir(path) if not e.startswith(".")]
+                if not entries:
+                    corrupt.append(path)
+    return corrupt
 
 def _mod_name_from_path(path, mid):
     name = mid

@@ -14,6 +14,21 @@ window { background: #0d0d0d; }
 .app-header { background: #0d0d0d; border-bottom: 1px solid #1c1c1c; padding: 12px 20px; }
 .app-title { color: #d4b483; font-size: 22px; font-weight: 900; letter-spacing: 3px; font-family: monospace; }
 .app-sub   { color: #333; font-size: 10px; letter-spacing: 2px; font-family: monospace; }
+.header-link { background: transparent; border: none; border-radius: 3px; color: #5a8aaa;
+               font-size: 11px; letter-spacing: 1px; padding: 4px 8px; margin: 0; min-height: 0; }
+.header-link:hover { background: #0f1a22; color: #7aaccf; }
+.header-link.active { color: #d4b483; background: #1a1208; }
+.header-link-dl { color: #d4b483; font-weight: 700; }
+
+/* Welcome screen */
+.welcome-title { color: #d4b483; font-size: 48px; font-weight: 900; letter-spacing: 4px; font-family: monospace; }
+.welcome-sub { color: #444; font-size: 13px; letter-spacing: 2px; font-family: monospace; }
+.welcome-primary { background: #1e1409; border: 1px solid #d4b483; border-radius: 4px;
+                   color: #d4b483; font-size: 14px; font-weight: 700; padding: 12px 48px; letter-spacing: 2px; }
+.welcome-primary:hover { background: #2a1e0d; }
+.welcome-secondary { background: #161616; border: 1px solid #252525; border-radius: 4px;
+                     color: #666; font-size: 12px; padding: 8px 24px; }
+.welcome-secondary:hover { background: #1c1c1c; color: #aaa; border-color: #333; }
 
 /* Toolbar */
 .toolbar { background: #111; border-bottom: 1px solid #1c1c1c; padding: 6px 12px; }
@@ -67,18 +82,27 @@ window { background: #0d0d0d; }
 .btn-danger:hover { background: #1a0d0d; }
 
 /* Status bar */
-.statusbar { background: #080808; border-top: 1px solid #161616; padding: 3px 12px; }
-.status-txt { color: #333; font-size: 10px; font-family: monospace; }
+.statusbar { background: #080808; border-top: 1px solid #1a1a1a; padding: 6px 16px; min-height: 32px; }
+.status-txt { color: #3a3a3a; font-size: 11px; font-family: monospace; }
+.statusbar-sep { background: #1e1e1e; margin: 0 6px; min-width: 1px; }
+.statusbar-dl { padding-left: 8px; }
+.status-dl-speed { color: #5a8aaa; font-size: 11px; font-family: monospace; font-weight: 700; }
+.status-dl-pct { color: #d4b483; font-size: 11px; font-family: monospace; font-weight: 700; }
 
-/* Settings */
-.settings-group { background: #111; border: 1px solid #1c1c1c; border-radius: 4px;
-                  padding: 16px; margin: 8px 16px; }
-.settings-label { color: #555; font-size: 10px; letter-spacing: 1px; font-family: monospace; margin-bottom: 4px; }
-.settings-input { background: #161616; border: 1px solid #222; border-radius: 3px;
+/* Settings cards */
+.settings-card { background: #0f0f0f; border: 1px solid #1e1e1e; border-radius: 6px; }
+.settings-card-header { background: #0a0a0a; border-bottom: 1px solid #1a1a1a;
+                        border-radius: 6px 6px 0 0; padding: 10px 16px; }
+.settings-card-title { color: #5a8aaa; font-size: 10px; letter-spacing: 2px; font-weight: 700;
+                       font-family: monospace; }
+.settings-card-body { padding: 16px 16px; }
+.settings-field-label { color: #4a4a4a; font-size: 10px; letter-spacing: 1px; font-family: monospace; }
+.settings-note { color: #333; font-size: 10px; font-family: monospace; }
+.settings-check { color: #666; font-size: 12px; }
+.settings-check:checked { color: #ccc; }
+.settings-input { background: #141414; border: 1px solid #202020; border-radius: 3px;
                   color: #bbb; font-size: 12px; padding: 6px 10px; }
-.settings-input:focus { border-color: #d4b483; }
-.settings-title { color: #d4b483; font-size: 11px; letter-spacing: 2px; font-weight: 700;
-                  font-family: monospace; padding: 16px 16px 8px; }
+.settings-input:focus { border-color: #5a8aaa; }
 
 /* Mods */
 .mod-row { background: #111; border-bottom: 1px solid #161616; padding: 8px 16px; }

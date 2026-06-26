@@ -17,11 +17,11 @@ class ModProgressDialog:
         self.on_open_downloads = on_open_downloads
         self.mod_ids = list(mod_ids)
 
-        self.win = Adw.Window()
-        self.win.set_transient_for(parent)
-        self.win.set_modal(True)
+        self._parent = parent
+        self.win = Adw.Dialog()
         self.win.set_title(heading)
-        self.win.set_default_size(480, 420)
+        self.win.set_content_width(480)
+        self.win.set_content_height(420)
 
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         root.set_margin_top(20)
@@ -73,22 +73,16 @@ class ModProgressDialog:
         scroll.set_child(self.list_box)
         root.append(scroll)
 
-        action_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        action_row.set_halign(Gtk.Align.START)
-        action_row.set_margin_top(4)
-
-        if on_open_downloads:
-            dl_btn = Gtk.Button(label="Open Steam Downloads")
-            dl_btn.add_css_class("btn-ghost")
-            dl_btn.connect("clicked", lambda *_: on_open_downloads())
-            action_row.append(dl_btn)
-
-        self.next_btn = Gtk.Button(label="Next mod (subscribed)")
-        self.next_btn.add_css_class("btn-ghost")
-        self.next_btn.connect("clicked", self._on_next_mod)
-        action_row.append(self.next_btn)
-
-        root.append(action_row)
+        speed_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        speed_row.set_margin_top(4)
+        speed_icon = Gtk.Label(label="↓")
+        speed_icon.add_css_class("srv-detail")
+        speed_row.append(speed_icon)
+        self.speed_label = Gtk.Label(label="—")
+        self.speed_label.add_css_class("srv-players")
+        self.speed_label.set_halign(Gtk.Align.START)
+        speed_row.append(self.speed_label)
+        root.append(speed_row)
 
         btn_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         btn_row.set_halign(Gtk.Align.END)
@@ -106,9 +100,9 @@ class ModProgressDialog:
 
         root.append(btn_row)
 
-        self.win.set_content(root)
-        self.win.connect("close-request", self._on_close_request)
-        self.win.present()
+        self.win.set_child(root)
+        self.win.connect("closed", self._on_dialog_closed)
+        self.win.present(parent)
 
     def _run(self, fn):
         GLib.idle_add(fn)
@@ -144,10 +138,16 @@ class ModProgressDialog:
         self.request_cancel()
         self.close()
 
-    def _on_close_request(self, win):
+    def _on_dialog_closed(self, dialog):
         self.request_cancel()
         self._closed = True
-        return False
+
+    def set_speed(self, text):
+        def update():
+            if self._closed:
+                return
+            self.speed_label.set_text(text or "—")
+        self._run(update)
 
     def set_hint(self, text):
         def update():
@@ -221,5 +221,5 @@ class ModProgressDialog:
         self._closed = True
 
         def update():
-            self.win.close()
+            self.win.force_close()
         self._run(update)

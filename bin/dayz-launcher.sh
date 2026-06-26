@@ -271,7 +271,8 @@ setup_mods() {
     [[ -f "${modmeta}" ]] || err "Missing mod metadata for: ${modid}"
 
     local modname="$(gawk 'match($0,/name\s*=\s*"(.+)"/,m){print m[1];exit}' "${modmeta}")"
-    [[ -n "${modname}" ]] || err "Missing mod name for: ${modid}"
+    [[ -n "${modname}" ]] || modname="$(gawk 'match($0,/name\s*=\s*"(.+)"/,m){print m[1];exit}' "${modpath}/mod.cpp" 2>/dev/null)"
+    [[ -n "${modname}" ]] || modname="${modid}"
     debug "Mod ${modid} found: ${modname}"
     local modlink="@$(dec2base64 "${modid}")"
 

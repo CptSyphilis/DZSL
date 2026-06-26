@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 import os
 import sys
 
@@ -28,7 +27,7 @@ gi.require_version('Adw', '1')
 from gi.repository import Gtk, Adw, GLib, Gdk
 import threading, subprocess, time, os
 
-from config import load_cfg, save_json, load_json, FAVS_FILE, RECENT_FILE, is_steam_running
+from config import load_cfg, save_json, load_json, FAVS_FILE, RECENT_FILE, is_steam_running, find_corrupt_mods
 from css import CSS
 from connect import Connector, launch_steam
 from ui.servers import ServersView
@@ -48,7 +47,7 @@ class DZSL(Adw.Application):
         self.connect("activate", self.on_activate)
         self.cfg = load_cfg()
         self.favorites = load_json(FAVS_FILE)
-        self.current_view = "servers"
+        self.current_view = "welcome"
 
     def on_activate(self, app):
         self.win = Adw.ApplicationWindow(application=app)
@@ -72,7 +71,7 @@ class DZSL(Adw.Application):
             Gdk.Display.get_default(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
         )
 
-        self.connector = Connector(self.cfg, self.win, self.set_status)
+        self.connector = Connector(self.cfg, self.win, self.set_status, self.set_downloading)
 
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
 
@@ -85,8 +84,9 @@ class DZSL(Adw.Application):
         header_bar.set_title_widget(title)
 
         self.header_btns = {}
-        end_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        nav_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
         for key, label in [
+            ("servers", "servers"),
             ("favorites", "favorites"),
             ("recent", "recent"),
             ("mods", "mods"),
@@ -97,14 +97,16 @@ class DZSL(Adw.Application):
             b.add_css_class("header-link")
             b.connect("clicked", lambda _, k=key: self.show_view(k))
             self.header_btns[key] = b
-            end_box.append(b)
-        header_bar.pack_end(end_box)
+            nav_box.append(b)
 
-        home_btn = Gtk.Button(label="servers")
-        home_btn.add_css_class("header-link")
-        home_btn.connect("clicked", lambda _: self.show_view("servers"))
-        self.header_btns["servers"] = home_btn
-        header_bar.pack_start(home_btn)
+        self.dl_btn = Gtk.Button(label="downloading")
+        self.dl_btn.add_css_class("header-link")
+        self.dl_btn.add_css_class("header-link-dl")
+        self.dl_btn.set_visible(False)
+        self.dl_btn.connect("clicked", self._show_active_download)
+        nav_box.append(self.dl_btn)
+
+        header_bar.pack_end(nav_box)
 
         root.append(header_bar)
 
@@ -112,12 +114,38 @@ class DZSL(Adw.Application):
         self.panel.set_vexpand(True)
         root.append(self.panel)
 
-        sbar = Gtk.Box()
+        sbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
         sbar.add_css_class("statusbar")
+
         self.status_lbl = Gtk.Label(label="Ready")
         self.status_lbl.add_css_class("status-txt")
         self.status_lbl.set_halign(Gtk.Align.START)
+        self.status_lbl.set_hexpand(True)
         sbar.append(self.status_lbl)
+
+        self.dl_info_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        self.dl_info_box.add_css_class("statusbar-dl")
+        self.dl_info_box.set_visible(False)
+
+        sep = Gtk.Separator(orientation=Gtk.Orientation.VERTICAL)
+        sep.add_css_class("statusbar-sep")
+        self.dl_info_box.append(sep)
+
+        self.dl_speed_lbl = Gtk.Label()
+        self.dl_speed_lbl.add_css_class("status-dl-speed")
+        self.dl_info_box.append(self.dl_speed_lbl)
+
+        self.dl_phase_lbl = Gtk.Label()
+        self.dl_phase_lbl.add_css_class("status-txt")
+        self.dl_phase_lbl.set_max_width_chars(40)
+        self.dl_phase_lbl.set_ellipsize(3)
+        self.dl_info_box.append(self.dl_phase_lbl)
+
+        self.dl_pct_lbl = Gtk.Label()
+        self.dl_pct_lbl.add_css_class("status-dl-pct")
+        self.dl_info_box.append(self.dl_pct_lbl)
+
+        sbar.append(self.dl_info_box)
         root.append(sbar)
 
         self.win.set_content(root)
@@ -133,10 +161,6 @@ class DZSL(Adw.Application):
             surface.connect("notify::state", self._on_window_state_changed)
 
     def _on_window_state_changed(self, surface, _pspec):
-        """GTK4/XWayland sometimes leaves the window with a stale layout after a
-        minimize→restore cycle (worse if the window was moved beforehand). Nudging
-        the size by 1px and back forces GTK and the compositor to recompute the
-        allocation instead of reusing the broken one."""
         minimized = bool(surface.get_state() & Gdk.ToplevelState.MINIMIZED)
         if minimized:
             self._was_minimized = True
@@ -155,9 +179,6 @@ class DZSL(Adw.Application):
         return {"Ready", "Ready — start Steam to launch DayZ"}
 
     def _check_steam_running_async(self, callback):
-        """Run is_steam_running() (several subprocess calls) off the GTK main
-        thread so it can't stall the UI — fork/exec gets slow under CPU load,
-        which is exactly when DayZ is also running."""
         def worker():
             running = is_steam_running()
             GLib.idle_add(callback, running)
@@ -186,9 +207,9 @@ class DZSL(Adw.Application):
             self.set_status("Ready")
             self.show_view(self.current_view)
             GLib.timeout_add_seconds(5, self._poll_steam_status)
+            threading.Thread(target=self._scan_corrupt_mods, daemon=True).start()
             return
 
-        # Steam not running — do not let app "work"
         self.set_status("Steam is required to use DZSL. Starting Steam...")
         launch_steam()
         self._show_steam_wait_screen()
@@ -208,10 +229,22 @@ class DZSL(Adw.Application):
                 GLib.source_remove(self._recheck_source)
                 self._recheck_source = None
             GLib.timeout_add_seconds(5, self._poll_steam_status)
+            threading.Thread(target=self._scan_corrupt_mods, daemon=True).start()
         else:
             self.set_status("Waiting for Steam to start...")
 
-        GLib.timeout_add_seconds(2, _recheck)
+    def _scan_corrupt_mods(self):
+        import shutil
+        corrupt = find_corrupt_mods(self.cfg)
+        if not corrupt:
+            return
+        for path in corrupt:
+            log.warning("Removing corrupt mod directory: %s", path)
+            try:
+                shutil.rmtree(path)
+            except OSError as e:
+                log.error("Could not remove %s: %s", path, e)
+        GLib.idle_add(self.set_status, f"Cleaned up {len(corrupt)} corrupt mod folder(s) on startup")
 
     def _show_steam_wait_screen(self):
         self.clear_panel()
@@ -280,8 +313,15 @@ class DZSL(Adw.Application):
         log.info("View switched to %s", view)
         self.current_view = view
         self.clear_panel()
+        for k, b in self.header_btns.items():
+            if k == view:
+                b.add_css_class("active")
+            else:
+                b.remove_css_class("active")
 
-        if view == "favorites":
+        if view == "welcome":
+            self._build_welcome()
+        elif view == "favorites":
             ListView(self.panel, self.favorites, "No saved servers yet.\nUse the server browser or Add Server.", self.favorites, self.connector.connect, self.toggle_fav, self.connector.load_mods, self.set_status).build()
         elif view == "recent":
             ListView(self.panel, load_json(RECENT_FILE), "No recently joined servers.", self.favorites, self.connector.connect, self.toggle_fav, self.connector.load_mods, self.set_status).build()
@@ -293,6 +333,82 @@ class DZSL(Adw.Application):
             ModsView(self.panel, self.cfg, self.set_status).build()
         elif view == "settings":
             SettingsView(self.panel, self.cfg, self.set_status, lambda: self.show_view("settings")).build()
+
+    def set_downloading(self, active, progress=None):
+        def update():
+            self.dl_btn.set_visible(active)
+            self._active_progress = progress
+            self._dl_poll_active = active
+            if active:
+                GLib.timeout_add(500, self._poll_dl_status)
+            else:
+                self.dl_info_box.set_visible(False)
+        GLib.idle_add(update)
+
+    def _poll_dl_status(self):
+        if not getattr(self, "_dl_poll_active", False):
+            return False
+        p = getattr(self, "_active_progress", None)
+        if not p or p._closed:
+            self.dl_info_box.set_visible(False)
+            return False
+        speed = p.speed_label.get_text()
+        phase = p.status.get_text()
+        pct   = p.bar.get_text()
+        self.dl_speed_lbl.set_text(f"↓ {speed}" if speed and speed != "—" else "")
+        self.dl_speed_lbl.set_visible(bool(speed and speed != "—"))
+        self.dl_phase_lbl.set_text(phase or "")
+        self.dl_pct_lbl.set_text(pct or "")
+        self.dl_info_box.set_visible(True)
+        return True
+
+    def _show_active_download(self, *_):
+        p = getattr(self, "_active_progress", None)
+        if p and not p._closed:
+            p.win.present(self.win)
+
+    def _build_welcome(self):
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        outer.set_vexpand(True)
+        outer.set_valign(Gtk.Align.CENTER)
+        outer.set_halign(Gtk.Align.CENTER)
+
+        vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=20)
+        vbox.set_halign(Gtk.Align.CENTER)
+
+        img = Gtk.Image.new_from_icon_name("dzsl")
+        img.set_pixel_size(96)
+        vbox.append(img)
+
+        title = Gtk.Label(label="DZSL")
+        title.add_css_class("welcome-title")
+        vbox.append(title)
+
+        sub = Gtk.Label(label="DAYZ SERVER BROWSER FOR LINUX")
+        sub.add_css_class("welcome-sub")
+        vbox.append(sub)
+
+        spacer = Gtk.Box()
+        spacer.set_size_request(-1, 12)
+        vbox.append(spacer)
+
+        browse = Gtk.Button(label="BROWSE SERVERS")
+        browse.add_css_class("welcome-primary")
+        browse.set_halign(Gtk.Align.CENTER)
+        browse.connect("clicked", lambda _: self.show_view("servers"))
+        vbox.append(browse)
+
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        row.set_halign(Gtk.Align.CENTER)
+        for label, view in [("Favorites", "favorites"), ("Recent", "recent")]:
+            b = Gtk.Button(label=label)
+            b.add_css_class("welcome-secondary")
+            b.connect("clicked", lambda _, v=view: self.show_view(v))
+            row.append(b)
+        vbox.append(row)
+
+        outer.append(vbox)
+        self.panel.append(outer)
 
     def toggle_fav(self, server, btn=None):
         ip   = server.get("ip") or server.get("endpoint", {}).get("ip")

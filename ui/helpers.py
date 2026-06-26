@@ -306,10 +306,16 @@ def forward_steam_uri(uri):
             continue
     return False
 
-def unsubscribe_mod_ids(mod_ids):
+def unsubscribe_mod_ids(mod_ids, cfg=None):
+    import shutil
+    from config import workshop_dirs, load_cfg
+    dirs = workshop_dirs(cfg or load_cfg())
     for mid in mod_ids:
-        forward_steam_uri(f"steam://unsubscribe/{mid}")
-        time.sleep(0.35)
+        mid = str(mid)
+        for wd in dirs:
+            path = os.path.join(wd, mid)
+            if os.path.isdir(path):
+                shutil.rmtree(path, ignore_errors=True)
 
 def prompt_unsubscribe_server_mods(parent, server, set_status=None):
     import gi

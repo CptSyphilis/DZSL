@@ -1,4 +1,4 @@
-import gi
+import gi, shutil
 gi.require_version('Gtk', '4.0')
 from gi.repository import Gtk, GLib
 import requests, threading, subprocess, os, time
@@ -28,13 +28,13 @@ class ModsView:
         else:
             self.set_status("Could not open Steam — start Steam and try again.")
 
-    def _unsub_mod(self, mid, name, btn):
-        if not forward_steam_uri(f"steam://unsubscribe/{mid}"):
-            self.set_status("Could not open Steam — start Steam and try again.")
-            return
-        self.set_status(f"Unsubscribing from {name}…")
-        btn.set_label("Done")
-        btn.set_sensitive(False)
+    def _unsub_mod(self, mid, name, btn, path, on_done=None):
+        def do():
+            shutil.rmtree(path, ignore_errors=True)
+            GLib.idle_add(self.set_status, f"Removed {name}")
+            if on_done:
+                GLib.idle_add(on_done)
+        threading.Thread(target=do, daemon=True).start()
 
     def build(self):
         tbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
@@ -62,7 +62,6 @@ class ModsView:
         tb = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8); tb.add_css_class("toolbar")
         se = Gtk.Entry(); se.set_placeholder_text("Search mods…"); se.add_css_class("search-box"); se.set_hexpand(True); tb.append(se)
         ub = Gtk.Button(label="Check Updates"); ub.add_css_class("toolbar-btn"); ub.add_css_class("accent"); tb.append(ub)
-        vb = Gtk.Button(label="Verify All");    vb.add_css_class("toolbar-btn"); tb.append(vb)
         self.content.append(tb)
 
         scroll = Gtk.ScrolledWindow(); scroll.set_vexpand(True)
@@ -86,22 +85,31 @@ class ModsView:
                 wb.connect("clicked", lambda _, mid=m["id"]: forward_steam_uri(f"steam://url/CommunityFilePage/{mid}"))
                 bb.append(wb)
                 upd = Gtk.Button(label="Update"); upd.add_css_class("btn-ghost")
-                upd.connect("clicked", lambda _, mid=m["id"], nm=m["name"]: self._steam_action(f"steam://subscribe/{mid}", f"Updating {nm}…"))
+                upd.connect("clicked", lambda _, mid=m["id"], nm=m["name"]: self._steam_action(f"steam://installworkshop/221100/{mid}", f"Updating {nm}…"))
                 bb.append(upd)
                 db = Gtk.Button(label="Unsubscribe"); db.add_css_class("btn-danger")
-                db.connect("clicked", lambda _, mid=m["id"], nm=m["name"], btn=db: self._unsub_mod(mid, nm, btn))
+                db.connect("clicked", lambda _, mid=m["id"], nm=m["name"], p=m["path"], btn=db: self._unsub_mod(mid, nm, btn, p, populate))
                 bb.append(db); row.append(bb); self.inst_box.append(row)
 
         def check_updates(b):
             mods = get_installed_mods(self.cfg)
+            if not mods:
+                self.set_status("No mods installed.")
+                return
             ub.set_label("Checking…"); ub.set_sensitive(False)
+            self.set_status(f"Checking {len(mods)} mods for updates…")
             def _check():
                 outdated = []
+                error = None
                 try:
                     ids = [m["id"] for m in mods]
                     pd = {"itemcount": len(ids)}
                     for i, mid in enumerate(ids): pd[f"publishedfileids[{i}]"] = mid
-                    for d in requests.post("https://api.steampowered.com/ISteamRemoteStorage/GetPublishedFileDetails/v1/", data=pd, timeout=15).json().get("response", {}).get("publishedfiledetails", []):
+                    details = requests.post(
+                        "https://api.steampowered.com/ISteamRemoteStorage/GetPublishedFileDetails/v1/",
+                        data=pd, timeout=15,
+                    ).json().get("response", {}).get("publishedfiledetails", [])
+                    for d in details:
                         mid = str(d.get("publishedfileid", ""))
                         rt = d.get("time_updated", 0)
                         path = next(
@@ -109,40 +117,30 @@ class ModsView:
                             "",
                         )
                         lt = int(os.path.getmtime(path)) if path else 0
-                        if rt > lt: outdated.append(mid)
+                        if rt > lt:
+                            outdated.append(mid)
                 except Exception as e:
-                    GLib.idle_add(self.set_status, f"Update check failed: {e}")
-                GLib.idle_add(ub.set_label, "Check Updates"); GLib.idle_add(ub.set_sensitive, True)
-                if not outdated:
-                    GLib.idle_add(self.set_status, "OK All mods up to date")
+                    error = str(e)
+                GLib.idle_add(ub.set_label, "Check Updates")
+                GLib.idle_add(ub.set_sensitive, True)
+                if error:
+                    GLib.idle_add(self.set_status, f"Update check failed: {error}")
+                elif not outdated:
+                    GLib.idle_add(self.set_status, f"All {len(mods)} mods are up to date")
                 else:
                     for mid in outdated:
-                        # force re-download by unsub, remove local, sub
-                        forward_steam_uri(f"steam://unsubscribe/{mid}")
-                        time.sleep(0.5)
                         for wd in workshop_dirs(self.cfg):
                             p = os.path.join(wd, mid)
                             if os.path.isdir(p):
-                                import shutil
                                 shutil.rmtree(p, ignore_errors=True)
-                        forward_steam_uri(f"steam://subscribe/{mid}")
+                        forward_steam_uri(f"steam://installworkshop/221100/{mid}")
                         time.sleep(0.3)
-                    GLib.idle_add(self.set_status, f"Updating {len(outdated)} outdated mods")
+                    GLib.idle_add(self.set_status, f"Updating {len(outdated)} outdated mod(s) via Steam")
             threading.Thread(target=_check, daemon=True).start()
-
-        def verify_all(b):
-            mods = get_installed_mods(self.cfg); broken = []
-            for m in mods:
-                has_pbo = any(f.endswith(".pbo") for r, d, files in os.walk(m["path"]) for f in files)
-                if not has_pbo: broken.append(m["id"])
-            if broken:
-                for mid in broken: forward_steam_uri(f"steam://subscribe/{mid}"); time.sleep(0.2)
-                self.set_status(f"Repairing {len(broken)} broken mods")
-            else: self.set_status(f"OK All {len(mods)} mods verified OK")
 
         populate()
         se.connect("changed", lambda e: populate(e.get_text()))
-        ub.connect("clicked", check_updates); vb.connect("clicked", verify_all)
+        ub.connect("clicked", check_updates)
         scroll.set_child(self.inst_box); self.content.append(scroll)
 
     def _tools(self):

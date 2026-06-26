@@ -4,7 +4,11 @@ gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Gtk, GLib, Gdk, Adw
 import requests, threading
-from dotenv import load_dotenv
+try:
+    from dotenv import load_dotenv
+except ImportError:
+    def load_dotenv(*args, **kwargs):
+        return False
 from config import load_json, save_json, FILTERS_FILE
 from ui.server_row import copy_text, popup_at_cursor, dismiss_popover, ServerRow
 from ui.helpers import clear_box

@@ -7,6 +7,7 @@ from gi.repository import GLib, Adw, Gtk
 from config import (
     DAYZ_APPID, mod_installed, mod_subscribed, mod_subscribed_per_steam_log,
     is_steam_running, save_json, RECENT_FILE, load_json, load_cfg, FAVS_FILE,
+    workshop_dir,
 )
 
 from ui.progress import ModProgressDialog
@@ -14,6 +15,14 @@ from ui.helpers import filter_server_mods, forward_steam_uri, notify_check_steam
 from applog import get_logger
 
 log = get_logger("connect")
+
+try:
+    from dotenv import load_dotenv
+except ImportError:
+    def load_dotenv(*args, **kwargs):
+        return False
+
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
 def launch_steam():
     proc = subprocess.Popen(
@@ -34,10 +43,11 @@ def launch_steam():
     threading.Thread(target=_log_stderr, daemon=True).start()
 
 class Connector:
-    def __init__(self, cfg, win, set_status):
-        self.cfg        = cfg
-        self.win        = win
-        self.set_status = set_status
+    def __init__(self, cfg, win, set_status, set_downloading=None):
+        self.cfg             = cfg
+        self.win             = win
+        self.set_status      = set_status
+        self.set_downloading = set_downloading or (lambda *_: None)
         self._busy = False
         self._download_scheduled = False
 
@@ -316,6 +326,7 @@ class Connector:
             mod_names or {},
             on_open_downloads=self._open_steam_downloads,
         )
+        self.set_downloading(True, progress)
         threading.Thread(
             target=self._dl_and_finish,
             args=(queue, sizes, server, mod_names, name, launch, password, progress),
@@ -335,20 +346,25 @@ class Connector:
             (result.stdout or "") + (result.stderr or ""),
         )
 
+    def _wait_for_steam_start(self, iterations=90, step=2, ready_sleep=3):
+        for i in range(iterations):
+            time.sleep(step)
+            if self.is_steam_running():
+                time.sleep(ready_sleep)
+                return True
+            elapsed = (i + 1) * step
+            if elapsed % 20 == 0:
+                self.set_status(f"Waiting for Steam to start ({elapsed}s)…")
+        return False
+
     def _ensure_steam_for_launch(self):
         if self.is_steam_running():
             return True
         self.set_status("Starting Steam…")
         launch_steam()
-        for i in range(90):
-            time.sleep(2)
-            if self.is_steam_running():
-                time.sleep(3)
-                self.set_status("Steam ready.")
-                return True
-            elapsed = (i + 1) * 2
-            if elapsed % 20 == 0:
-                self.set_status(f"Waiting for Steam to start ({elapsed}s)…")
+        if self._wait_for_steam_start(ready_sleep=3):
+            self.set_status("Steam ready.")
+            return True
         self.set_status("Steam did not start in time.")
         self._show_error(
             "Steam required to launch",
@@ -412,21 +428,6 @@ class Connector:
                 self._sync_steam_subscriptions(server_mods, start_if_needed=False)
             self.set_status(f"Mods ready for {name}")
 
-    def _ensure_steam_for_workshop(self):
-        if self.is_steam_running():
-            return True
-        self.set_status("Starting Steam for workshop mods…")
-        launch_steam()
-        for i in range(90):
-            time.sleep(2)
-            if self.is_steam_running():
-                time.sleep(4)
-                return True
-            elapsed = (i + 1) * 2
-            if elapsed % 20 == 0:
-                self.set_status(f"Waiting for Steam to start ({elapsed}s)…")
-        return False
-
     def _show_dl_dialog(self, mod_ids, server, mod_names, name, launch, password):
         names = mod_names or {}
         lines = [f"• {names.get(m, m)}" for m in mod_ids]
@@ -479,21 +480,106 @@ class Connector:
             return 3600
         return 900
 
+    def _depotdownloader_path(self):
+        candidates = [
+            os.path.expanduser("~/tools/depotdownloader/DepotDownloader"),
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "bin", "DepotDownloader"),
+        ]
+        for p in candidates:
+            if os.path.isfile(p) and os.access(p, os.X_OK):
+                return p
+        return None
+
+    def _get_steam_username(self):
+        vdf = os.path.expanduser("~/.local/share/Steam/config/loginusers.vdf")
+        try:
+            text = open(vdf, errors="ignore").read()
+            for m in re.finditer(r'"(\d{17})"[^{]*\{([^}]*)\}', text, re.DOTALL):
+                block = m.group(2)
+                if '"MostRecent"\t\t"1"' in block or '"MostRecent"  "1"' in block:
+                    nm = re.search(r'"AccountName"\s+"([^"]+)"', block)
+                    if nm:
+                        return nm.group(1)
+        except OSError:
+            pass
+        return None
+
+    def _download_mod_depotdownloader(self, mid, mod_name, dest_dir, progress=None, size_bytes=0):
+        depot_bin = self._depotdownloader_path()
+        username = self._get_steam_username()
+        if not depot_bin or not username:
+            return False, "DepotDownloader not available"
+
+        os.makedirs(dest_dir, exist_ok=True)
+        max_chunks = int(self.cfg.get("download_max_chunks", 8))
+        cmd = [depot_bin, "-app", DAYZ_APPID, "-pubfile", mid,
+               "-username", username, "-remember-password", "-dir", dest_dir,
+               "-max-downloads", str(max(1, min(max_chunks, 8)))]
+        speed_kbps = int(self.cfg.get("download_speed_kbps", 0) or 0)
+        if speed_kbps > 0:
+            import shutil as _shutil
+            if _shutil.which("trickle"):
+                cmd = ["trickle", "-d", str(speed_kbps)] + cmd
+            else:
+                log.warning("Speed limit set but trickle not found — downloading unlimited")
+        log.info("DepotDownloader: %s (%s) -> %s", mod_name, mid, dest_dir)
+        try:
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            prev_pct = 0.0
+            prev_bytes = 0.0
+            prev_time = time.time()
+            for line in proc.stdout:
+                line = line.strip()
+                if not line:
+                    continue
+                log.debug("depot: %s", line)
+                m = re.match(r'\s*(\d+\.\d+)%', line)
+                if m:
+                    pct = float(m.group(1))
+                    now = time.time()
+                    elapsed = now - prev_time
+                    if progress:
+                        GLib.idle_add(progress.set_hint, f"{pct:.0f}%")
+                    if size_bytes and elapsed >= 1.0:
+                        bytes_done = pct / 100.0 * size_bytes
+                        bps = (bytes_done - prev_bytes) / elapsed
+                        if bps >= 0:
+                            GLib.idle_add(progress.set_speed, self._format_size(bps) + "/s")
+                        prev_bytes = bytes_done
+                        prev_time = now
+                    prev_pct = pct
+                if progress and progress.is_cancelled():
+                    proc.terminate()
+                    proc.wait()
+                    self._cleanup_partial_mod(dest_dir, mid)
+                    return False, "cancelled"
+            proc.wait()
+            if progress:
+                GLib.idle_add(progress.set_speed, "—")
+            if proc.returncode == 0:
+                log.info("DepotDownloader done: %s (%s)", mod_name, mid)
+                return True, ""
+            self._cleanup_partial_mod(dest_dir, mid)
+            return False, f"DepotDownloader exited {proc.returncode}"
+        except Exception as exc:
+            log.error("DepotDownloader error for %s: %s", mid, exc)
+            self._cleanup_partial_mod(dest_dir, mid)
+            return False, str(exc)
+
+    def _cleanup_partial_mod(self, dest_dir, mid):
+        import shutil as _shutil
+        if os.path.isdir(dest_dir):
+            log.warning("Cleaning up partial download for %s: %s", mid, dest_dir)
+            try:
+                _shutil.rmtree(dest_dir)
+            except OSError as e:
+                log.error("Failed to clean up %s: %s", dest_dir, e)
+
     def _subscribe_mod_steam(self, mod_id, mod_name):
-        mid = str(mod_id)
-        if mod_installed(self.cfg, mid):
-            return
-        log.info("Steam subscribe: %s (%s)", mod_name, mid)
-        self._forward_steam_uri(f"steam://subscribe/{mid}")
-        time.sleep(0.3)
-        self._forward_steam_uri(f"steam://installworkshop/{DAYZ_APPID}/{mid}")
-        time.sleep(1)
+        self._forward_steam_uri(f"steam://installworkshop/221100/{str(mod_id)}")
+
 
     def _open_workshop_page(self, mod_id, mod_name):
-        """Fallback when steam://subscribe and steam://installworkshop are silently
-        dropped (observed on current Steam clients — neither verb shows up in
-        Steam's own logs). steam://url/CommunityFilePage/ still works and opens the
-        item's Workshop page so the user can click Subscribe manually."""
         mid = str(mod_id)
         log.warning("Auto-subscribe unresponsive for %s (%s) — opening Workshop page for manual subscribe", mod_name, mid)
         self._forward_steam_uri(f"steam://url/CommunityFilePage/{mid}")
@@ -504,25 +590,15 @@ class Connector:
         if start_if_needed and not self.is_steam_running():
             self.set_status("Starting Steam to subscribe mods…")
             launch_steam()
-            for _ in range(20):
-                time.sleep(2)
-                if self.is_steam_running():
-                    time.sleep(2)
-                    break
+            self._wait_for_steam_start(iterations=20, ready_sleep=2)
         if not self.is_steam_running():
             return
         notify_check_steam()
         for mid in mod_ids:
             mid = str(mid)
-            self._forward_steam_uri(f"steam://subscribe/{mid}")
-            time.sleep(0.3)
-            self._forward_steam_uri(f"steam://installworkshop/{DAYZ_APPID}/{mid}")
-            time.sleep(0.5)
+            self._subscribe_mod_steam(mid, mid)
 
     def _subscribe_and_wait_mods(self, mod_ids, mod_names, sizes=None, progress=None):
-        """Subscribe to needed mods via steam:// URIs + a manual Workshop-page
-        click for whatever's left (those URI verbs are silently dropped by
-        current Steam clients — see _open_workshop_page)."""
         self._refresh_cfg()
         names = mod_names or {}
         total = len(mod_ids)
@@ -545,27 +621,42 @@ class Connector:
         if progress and progress.is_cancelled():
             return False, "cancelled"
 
-        notify_check_steam()
+        depot_bin = self._depotdownloader_path()
+        username = self._get_steam_username()
+        use_depot = bool(depot_bin and username)
+        if not use_depot:
+            notify_check_steam()
+
         for idx, mid in enumerate(pending, start=1):
             if progress and progress.is_cancelled():
                 log.info("Mod download cancelled before [%d/%d]", idx, len(pending))
                 return False, "cancelled"
             mod_name = names.get(mid, mid)
-            log.info("[%d/%d] Subscribing: %s (%s)", idx, len(pending), mod_name, mid)
-            self.set_status(f"Subscribing to {mod_name}…")
+            log.info("[%d/%d] Downloading: %s (%s)", idx, len(pending), mod_name, mid)
+            self.set_status(f"Downloading {mod_name}…")
             if progress:
-                progress.set_action_prompt(f"Subscribing via Steam:\n{mod_name}")
+                progress.set_action_prompt(f"Downloading:\n{mod_name}")
                 progress.set_hint("")
                 progress.clear_continue()
-            self._subscribe_mod_steam(mid, mod_name)
-            if not self._wait_for_mod_installed(mid, progress, mod_name):
-                log.error("[%d/%d] Gave up waiting for %s (%s) after 10 minutes", idx, len(pending), mod_name, mid)
-                return False, f"Timeout waiting for {mod_name}"
+
+            if use_depot:
+                dest = os.path.join(workshop_dir(self.cfg), mid)
+                ok, err = self._download_mod_depotdownloader(
+                    mid, mod_name, dest, progress, size_bytes=sizes.get(mid, 0) if sizes else 0
+                )
+            else:
+                self._subscribe_mod_steam(mid, mod_name)
+                ok = self._wait_for_mod_installed(mid, progress, mod_name)
+                err = "" if ok else f"Timeout waiting for {mod_name}"
+
+            if not ok:
+                log.error("[%d/%d] Failed %s: %s", idx, len(pending), mod_name, err)
+                return False, err
             self._mark_mod_progress(progress, mid)
             done += 1
             if progress:
                 progress.set_download_progress(done, total)
-            log.info("[%d/%d] Done with: %s", idx, len(pending), mod_name)
+            log.info("[%d/%d] Done: %s", idx, len(pending), mod_name)
         return True, ""
 
     def _wait_for_mod_installed(self, mod_id, progress, mod_name, size_bytes=0):
@@ -583,24 +674,21 @@ class Connector:
             if mod_installed(self.cfg, mid):
                 log.info("%s installed after %ds", mod_name, int(time.time() - start))
                 return True
+            # workshop_log.txt reflects a subscribe instantly; appworkshop_*.acf
+            # (mod_subscribed) lags behind it — check both so the fallback-page
+            # and resend logic below don't act as if nothing happened yet.
+            subscribed = mod_subscribed(self.cfg, mid) or mod_subscribed_per_steam_log(mid)
             if progress and progress.continue_requested():
-                if mod_subscribed_per_steam_log(mid):
-                    # Confirmed via Steam's own workshop_log.txt — the user really
-                    # did subscribe, not just clicked through. Stop waiting on this
-                    # one and let Steam keep downloading it in the background.
-                    # (appworkshop_*.acf, which mod_subscribed() reads, lags too far
-                    # behind the actual subscribe event to use for this check.)
+                if subscribed:
                     log.info("User advanced past %s after %ds (subscription confirmed)", mod_name, int(time.time() - start))
                     progress.clear_continue()
                     return True
-                # Click registered but Steam shows no subscription yet for this
-                # mod — don't trust it blindly, keep waiting and tell the user why.
                 log.warning("Next-mod click for %s ignored — not yet subscribed per Steam", mod_name)
                 progress.clear_continue()
                 progress.set_hint(f"Not subscribed yet in Steam — click Subscribe first for:\n{mod_name}")
             elapsed = i * step
             opened_fallback_now = False
-            if not fallback_opened and elapsed >= 10 and not mod_subscribed(self.cfg, mid):
+            if not fallback_opened and elapsed >= 10 and not subscribed:
                 # Steam gave no sign of life (not even a subscription) within 10s —
                 # subscribe/installworkshop URIs are silently dropped by current
                 # Steam clients, so fall back to the Workshop page for a manual click.
@@ -608,11 +696,9 @@ class Connector:
                 opened_fallback_now = True
                 self._open_workshop_page(mid, mod_name)
                 notify_check_steam()
-            elif elapsed and elapsed % 30 == 0:  # keep retrying in case Steam fixes the verbs
+            elif elapsed and elapsed % 30 == 0 and not subscribed:  # keep retrying in case Steam fixes the verbs
                 log.warning("No progress on %s after %ds, resending subscribe URI", mod_name, elapsed)
-                self._forward_steam_uri(f"steam://subscribe/{mid}")
-                time.sleep(0.3)
-                self._forward_steam_uri(f"steam://installworkshop/{DAYZ_APPID}/{mid}")
+                self._subscribe_mod_steam(mid, mod_name)
             if progress:
                 if opened_fallback_now:
                     progress.set_action_prompt(f"Click Subscribe in Steam for:\n{mod_name}")
@@ -704,6 +790,7 @@ class Connector:
             ok, err = self._subscribe_and_wait_mods(
                 mod_ids, names, sizes=sizes, progress=progress,
             )
+            self.set_downloading(False)
             if err == "cancelled" or self._download_cancelled(progress):
                 log.info("Mod download for %s cancelled by user", name)
                 self.set_status("Download cancelled.")
