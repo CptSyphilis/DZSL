@@ -88,6 +88,33 @@ window { background: #0d0d0d; }
 .statusbar-dl { padding-left: 8px; }
 .status-dl-speed { color: #5a8aaa; font-size: 11px; font-family: monospace; font-weight: 700; }
 .status-dl-pct { color: #d4b483; font-size: 11px; font-family: monospace; font-weight: 700; }
+.statusbar-dl-bar { min-height: 6px; }
+.statusbar-dl-bar trough { background: #1a1a1a; border-radius: 2px; min-height: 6px; }
+.statusbar-dl-bar progress { background: #d4b483; border-radius: 2px; min-height: 6px; }
+.statusbar-dl-arrow { background: transparent; border: none; color: #5a8aaa; font-size: 10px;
+                       padding: 2px 6px; min-height: 0; min-width: 0; }
+.statusbar-dl-arrow:hover { color: #d4b483; }
+
+/* Download toast popover */
+popover.dl-toast { background: transparent; }
+popover.dl-toast > contents {
+    background: #0f0f0f;
+    border: 1px solid #1e1e1e;
+    border-radius: 6px;
+    padding: 0;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+}
+.dl-toast-eyebrow { color: #5a8aaa; font-size: 10px; letter-spacing: 2px; font-weight: 700;
+                     font-family: monospace; }
+.dl-toast-sep { background: #1e1e1e; min-height: 1px; }
+.dl-toast-name { color: #d4b483; font-size: 13px; font-weight: 700; font-family: monospace; }
+.dl-toast-pct { color: #d4b483; font-size: 12px; font-weight: 700; font-family: monospace; }
+.dl-toast-bar { min-height: 5px; }
+.dl-toast-bar trough { background: #1a1a1a; border-radius: 2px; min-height: 5px; }
+.dl-toast-bar progress { background: #d4b483; border-radius: 2px; min-height: 5px; }
+.dl-toast-meta { color: #555; font-size: 10px; font-family: monospace; }
+.dl-toast-speed { color: #5a8aaa; font-size: 11px; font-weight: 700; font-family: monospace; }
+.dl-toast-hint { color: #3a3a3a; font-size: 10px; font-family: monospace; }
 
 /* Settings cards */
 .settings-card { background: #0f0f0f; border: 1px solid #1e1e1e; border-radius: 6px; }

@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import os
 import sys
 
@@ -102,13 +103,6 @@ class DZSL(Adw.Application):
             self.header_btns[key] = b
             nav_box.append(b)
 
-        self.dl_btn = Gtk.Button(label="downloading")
-        self.dl_btn.add_css_class("header-link")
-        self.dl_btn.add_css_class("header-link-dl")
-        self.dl_btn.set_visible(False)
-        self.dl_btn.connect("clicked", self._show_active_download)
-        nav_box.append(self.dl_btn)
-
         header_bar.pack_end(nav_box)
 
         root.append(header_bar)
@@ -134,19 +128,34 @@ class DZSL(Adw.Application):
         sep.add_css_class("statusbar-sep")
         self.dl_info_box.append(sep)
 
+        self.dl_bar = Gtk.ProgressBar()
+        self.dl_bar.add_css_class("statusbar-dl-bar")
+        self.dl_bar.set_size_request(120, -1)
+        self.dl_bar.set_valign(Gtk.Align.CENTER)
+        self.dl_info_box.append(self.dl_bar)
+
         self.dl_speed_lbl = Gtk.Label()
         self.dl_speed_lbl.add_css_class("status-dl-speed")
         self.dl_info_box.append(self.dl_speed_lbl)
 
         self.dl_phase_lbl = Gtk.Label()
         self.dl_phase_lbl.add_css_class("status-txt")
-        self.dl_phase_lbl.set_max_width_chars(40)
+        self.dl_phase_lbl.set_max_width_chars(30)
         self.dl_phase_lbl.set_ellipsize(3)
         self.dl_info_box.append(self.dl_phase_lbl)
+
+        self.dl_size_lbl = Gtk.Label()
+        self.dl_size_lbl.add_css_class("status-txt")
+        self.dl_info_box.append(self.dl_size_lbl)
 
         self.dl_pct_lbl = Gtk.Label()
         self.dl_pct_lbl.add_css_class("status-dl-pct")
         self.dl_info_box.append(self.dl_pct_lbl)
+
+        self.dl_arrow_btn = Gtk.Button(label="▲")
+        self.dl_arrow_btn.add_css_class("statusbar-dl-arrow")
+        self.dl_arrow_btn.connect("clicked", self._toggle_download_popover)
+        self.dl_info_box.append(self.dl_arrow_btn)
 
         sbar.append(self.dl_info_box)
         root.append(sbar)
@@ -357,10 +366,16 @@ class DZSL(Adw.Application):
 
     def set_downloading(self, active, progress=None):
         def update():
-            self.dl_btn.set_visible(active)
+            old = getattr(self, "_active_progress", None)
+            if old is not None and old is not progress:
+                old.popover.popdown()
+                if old.popover.get_parent():
+                    old.popover.unparent()
             self._active_progress = progress
             self._dl_poll_active = active
             if active:
+                progress.popover.set_parent(self.dl_arrow_btn)
+                progress.popover.popup()
                 GLib.timeout_add(500, self._poll_dl_status)
             else:
                 self.dl_info_box.set_visible(False)
@@ -374,19 +389,26 @@ class DZSL(Adw.Application):
             self.dl_info_box.set_visible(False)
             return False
         speed = p.speed_label.get_text()
-        phase = p.status.get_text()
-        pct   = p.bar.get_text()
+        frac  = getattr(p, "current_fraction", 0.0)
+        mod_name = getattr(p, "current_mod_name", "")
+        size_txt = getattr(p, "current_size_text", "")
+        self.dl_bar.set_fraction(frac)
         self.dl_speed_lbl.set_text(f"↓ {speed}" if speed and speed != "—" else "")
         self.dl_speed_lbl.set_visible(bool(speed and speed != "—"))
-        self.dl_phase_lbl.set_text(phase or "")
-        self.dl_pct_lbl.set_text(pct or "")
+        self.dl_phase_lbl.set_text(mod_name or "Downloading…")
+        self.dl_size_lbl.set_text(size_txt)
+        self.dl_pct_lbl.set_text(f"{int(frac * 100)}%" if mod_name else "")
         self.dl_info_box.set_visible(True)
         return True
 
-    def _show_active_download(self, *_):
+    def _toggle_download_popover(self, *_):
         p = getattr(self, "_active_progress", None)
-        if p and not p._closed:
-            p.win.present()
+        if not p or p._closed:
+            return
+        if p.popover.get_visible():
+            p.popover.popdown()
+        else:
+            p.popover.popup()
 
     def _build_welcome(self):
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)

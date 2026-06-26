@@ -321,8 +321,6 @@ class Connector:
     def _open_mod_progress(self, queue, sizes, server, mod_names, name, launch, password):
         """Create the mod progress UI and start the download worker (GTK main thread only)."""
         progress = ModProgressDialog(
-            self.win,
-            f"Downloading {len(queue)} mods",
             queue,
             mod_names or {},
             on_open_downloads=self._open_steam_downloads,
@@ -551,10 +549,10 @@ class Connector:
                 if m:
                     pct = float(m.group(1))
                     now = time.time()
+                    bytes_done = pct / 100.0 * size_bytes if size_bytes else None
                     if progress:
-                        GLib.idle_add(progress.set_mod_progress, mid, pct / 100.0)
+                        GLib.idle_add(progress.set_mod_progress, mid, pct / 100.0, bytes_done, size_bytes)
                     if size_bytes:
-                        bytes_done = pct / 100.0 * size_bytes
                         speed_window.append((now, bytes_done))
                         # drop samples older than WINDOW_SECS
                         cutoff = now - WINDOW_SECS
@@ -567,6 +565,11 @@ class Connector:
                                 bps = db / dt
                                 GLib.idle_add(progress.set_speed, self._format_size(bps) + "/s")
                     prev_pct = pct
+                elif progress:
+                    # Not a percentage line (e.g. "Got licenses…", "Got AppInfo…") —
+                    # still show it so the dialog doesn't look frozen before the
+                    # first % update arrives.
+                    GLib.idle_add(progress.set_hint, f"{mod_name}: {line}")
                 if progress and progress.is_cancelled():
                     proc.terminate()
                     proc.wait()
@@ -658,7 +661,15 @@ class Connector:
         if not use_depot:
             notify_check_steam()
 
-        n_parallel = max(1, int(self.cfg.get("download_parallel", 3)))
+        if use_depot:
+            # Multiple DepotDownloader processes logging into the same Steam
+            # account at once collide and cause cascading "Lost connection to
+            # Steam. Reconnecting" / "A task was canceled" failures across all
+            # of them — confirmed directly (11/11 mods failed at parallel=3,
+            # the 12th succeeded once it ran alone). Must stay sequential.
+            n_parallel = 1
+        else:
+            n_parallel = max(1, int(self.cfg.get("download_parallel", 3)))
         log.info("Downloading %d mod(s) with up to %d in parallel", len(pending), n_parallel)
         if progress:
             progress.set_action_prompt(f"Downloading {len(pending)} mod(s)…")

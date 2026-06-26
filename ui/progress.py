@@ -1,14 +1,23 @@
 import threading
 import gi
 gi.require_version('Gtk', '4.0')
-gi.require_version('Adw', '1')
-from gi.repository import Gtk, Adw, GLib
+from gi.repository import Gtk, GLib
+
+def _fmt_bytes(n):
+    n = float(n or 0)
+    if n < 1024:
+        return f"{int(n)} B"
+    if n < 1024 ** 2:
+        return f"{n / 1024:.1f} KB"
+    if n < 1024 ** 3:
+        return f"{n / 1024 ** 2:.1f} MB"
+    return f"{n / 1024 ** 3:.2f} GB"
 
 class ModProgressDialog:
     SUBSCRIBE_END = 0.20
     DOWNLOAD_END  = 0.92
 
-    def __init__(self, parent, heading, mod_ids, names, on_cancel=None,
+    def __init__(self, mod_ids, names, on_cancel=None,
                  on_open_downloads=None):
         self._cancel   = threading.Event()
         self._continue = threading.Event()
@@ -16,116 +25,90 @@ class ModProgressDialog:
         self.on_cancel = on_cancel
         self.on_open_downloads = on_open_downloads
         self.mod_ids   = list(mod_ids)
+        self.names     = names or {}
+        self.total       = len(self.mod_ids)
+        self.done_count  = 0
+        self.current_mod_name  = ""
+        self.current_fraction  = 0.0
+        self.current_size_text = ""
 
-        self.win = Adw.Window()
-        self.win.set_title(heading)
-        self.win.set_default_size(500, 520)
-        self.win.set_transient_for(parent)
-        self.win.set_modal(False)
-        self.win.connect("close-request", self._on_close_request)
+        # Popover is unparented until main.py attaches it to the status-bar
+        # arrow button and pops it up — this lets the panel "grow out of"
+        # the bottom-right corner instead of floating as a separate window.
+        self.popover = Gtk.Popover()
+        self.popover.add_css_class("dl-toast")
+        self.popover.set_position(Gtk.PositionType.TOP)
+        self.popover.set_has_arrow(False)
+        self.popover.set_autohide(True)
 
-        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-        root.set_margin_top(20)
-        root.set_margin_bottom(20)
-        root.set_margin_start(20)
-        root.set_margin_end(20)
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        root.add_css_class("dl-toast-body")
+        root.set_size_request(280, -1)
+        root.set_margin_top(14)
+        root.set_margin_bottom(12)
+        root.set_margin_start(14)
+        root.set_margin_end(14)
 
-        title = Gtk.Label(label=heading)
-        title.add_css_class("settings-title")
-        title.set_halign(Gtk.Align.START)
-        root.append(title)
+        eyebrow_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        self.eyebrow = Gtk.Label(label=f"DOWNLOADING · 0/{self.total}")
+        self.eyebrow.add_css_class("dl-toast-eyebrow")
+        self.eyebrow.set_halign(Gtk.Align.START)
+        self.eyebrow.set_hexpand(True)
+        eyebrow_row.append(self.eyebrow)
+        root.append(eyebrow_row)
+
+        sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+        sep.add_css_class("dl-toast-sep")
+        root.append(sep)
+
+        name_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        self.name_lbl = Gtk.Label(label="Preparing…")
+        self.name_lbl.add_css_class("dl-toast-name")
+        self.name_lbl.set_halign(Gtk.Align.START)
+        self.name_lbl.set_hexpand(True)
+        self.name_lbl.set_ellipsize(3)
+        name_row.append(self.name_lbl)
+        self.pct_lbl = Gtk.Label(label="")
+        self.pct_lbl.add_css_class("dl-toast-pct")
+        name_row.append(self.pct_lbl)
+        root.append(name_row)
+
+        self.bar = Gtk.ProgressBar()
+        self.bar.add_css_class("dl-toast-bar")
+        self.bar.set_show_text(False)
+        root.append(self.bar)
+
+        meta_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        self.size_lbl = Gtk.Label(label="")
+        self.size_lbl.add_css_class("dl-toast-meta")
+        self.size_lbl.set_halign(Gtk.Align.START)
+        self.size_lbl.set_hexpand(True)
+        meta_row.append(self.size_lbl)
+        self.speed_label = Gtk.Label(label="—")
+        self.speed_label.add_css_class("dl-toast-speed")
+        meta_row.append(self.speed_label)
+        root.append(meta_row)
 
         self.hint = Gtk.Label(label="")
-        self.hint.add_css_class("status-txt")
+        self.hint.add_css_class("dl-toast-hint")
         self.hint.set_halign(Gtk.Align.START)
-        self.hint.set_wrap(True)
+        self.hint.set_wrap(False)
+        self.hint.set_ellipsize(3)
         self.hint.set_visible(False)
         root.append(self.hint)
 
-        self.status = Gtk.Label(label="Preparing…")
-        self.status.add_css_class("status-txt")
-        self.status.set_halign(Gtk.Align.START)
-        self.status.set_wrap(True)
-        root.append(self.status)
-
-        self.bar = Gtk.ProgressBar()
-        self.bar.set_show_text(True)
-        self.bar.set_fraction(0.0)
-        self.bar.set_text("0%")
-        root.append(self.bar)
-
-        scroll = Gtk.ScrolledWindow()
-        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        scroll.set_vexpand(True)
-        self.list_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        self.rows     = {}
-        self.mod_bars = {}
-        for mid in mod_ids:
-            row  = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-            mark = Gtk.Label(label="○")
-            mark.set_width_chars(2)
-            info = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-            info.set_hexpand(True)
-            name = Gtk.Label(label=names.get(mid, mid))
-            name.set_halign(Gtk.Align.START)
-            name.set_hexpand(True)
-            name.set_ellipsize(3)
-            info.append(name)
-            bar_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-            bar = Gtk.ProgressBar()
-            bar.set_hexpand(True)
-            bar.set_fraction(0.0)
-            bar.set_show_text(False)
-            bar.set_visible(False)
-            pct = Gtk.Label(label="")
-            pct.add_css_class("mod-dl-pct")
-            pct.set_width_chars(5)
-            pct.set_visible(False)
-            bar_row.append(bar)
-            bar_row.append(pct)
-            info.append(bar_row)
-            row.append(mark)
-            row.append(info)
-            self.rows[mid]     = mark
-            self.mod_bars[mid] = (bar, pct)
-            self.list_box.append(row)
-        scroll.set_child(self.list_box)
-        root.append(scroll)
-
-        speed_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        speed_row.set_margin_top(4)
-        speed_icon = Gtk.Label(label="↓")
-        speed_icon.add_css_class("srv-detail")
-        speed_row.append(speed_icon)
-        self.speed_label = Gtk.Label(label="—")
-        self.speed_label.add_css_class("srv-players")
-        self.speed_label.set_halign(Gtk.Align.START)
-        speed_row.append(self.speed_label)
-        root.append(speed_row)
-
-        btn_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        btn_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
         btn_row.set_halign(Gtk.Align.END)
-        btn_row.set_margin_top(4)
+        btn_row.set_margin_top(2)
 
-        self.stop_btn = Gtk.Button(label="Stop Download")
+        self.stop_btn = Gtk.Button(label="Stop")
         self.stop_btn.add_css_class("btn-danger")
         self.stop_btn.connect("clicked", self._on_stop)
         btn_row.append(self.stop_btn)
 
-        hide_btn = Gtk.Button(label="Hide")
-        hide_btn.add_css_class("btn-ghost")
-        hide_btn.connect("clicked", lambda _: self.win.hide())
-        btn_row.append(hide_btn)
-
         root.append(btn_row)
 
-        self.win.set_child(root)
-        self.win.present()
-
-    def _on_close_request(self, win):
-        # Window X button: hide, keep downloading
-        win.hide()
-        return True  # prevent destroy
+        self.popover.set_child(root)
 
     def _run(self, fn):
         GLib.idle_add(fn)
@@ -176,12 +159,10 @@ class ModProgressDialog:
         def update():
             if self._closed:
                 return
-            self.status.set_text(text)
-            if fraction is None:
-                self.bar.pulse()
-            else:
+            self.hint.set_text(text)
+            self.hint.set_visible(bool(text))
+            if fraction is not None:
                 self.bar.set_fraction(min(max(fraction, 0.0), 1.0))
-                self.bar.set_text(f"{int(fraction * 100)}%")
         self._run(update)
 
     def _download_fraction(self, done, total, subscribed=0):
@@ -208,39 +189,37 @@ class ModProgressDialog:
         msg   = f"Downloaded {done}/{total}"
         if subscribed > done:
             msg += f", subscribed {subscribed}/{total}"
-        if done < total:
-            if elapsed:
-                msg += f" — waiting for Steam ({elapsed}s)"
+        if done < total and elapsed:
+            msg += f" — waiting for Steam ({elapsed}s)"
         self.set_phase(msg, frac)
 
     def set_setup_progress(self, text):
         self.set_phase(text, 0.95)
 
-    def set_mod_progress(self, mid, fraction):
+    def set_mod_progress(self, mid, fraction, bytes_done=None, total_bytes=None):
+        fraction = max(0.0, min(1.0, fraction))
+        self.current_fraction = fraction
+        self.current_mod_name = self.names.get(mid, mid)
+        if bytes_done is not None and total_bytes:
+            self.current_size_text = f"{_fmt_bytes(bytes_done)} / {_fmt_bytes(total_bytes)}"
+        else:
+            self.current_size_text = ""
         def update():
-            if self._closed or mid not in self.mod_bars:
+            if self._closed:
                 return
-            bar, pct = self.mod_bars[mid]
-            bar.set_fraction(max(0.0, min(1.0, fraction)))
-            pct.set_text(f"{int(fraction * 100)}%")
-            bar.set_visible(True)
-            pct.set_visible(True)
+            self.name_lbl.set_text(self.current_mod_name)
+            self.pct_lbl.set_text(f"{int(fraction * 100)}%")
+            self.bar.set_fraction(fraction)
+            self.size_lbl.set_text(self.current_size_text)
         self._run(update)
 
     def mark_subscribed(self, mid):
-        def update():
-            if mid in self.rows:
-                self.rows[mid].set_text("◐")
-        self._run(update)
+        self.set_hint(f"Subscribed: {self.names.get(mid, mid)}")
 
-    def mark_installed(self, mid):
+    def mark_installed(self, _mid):
+        self.done_count += 1
         def update():
-            if mid in self.rows:
-                self.rows[mid].set_text("✓")
-            if mid in self.mod_bars:
-                bar, pct = self.mod_bars[mid]
-                bar.set_visible(False)
-                pct.set_visible(False)
+            self.eyebrow.set_text(f"DOWNLOADING · {self.done_count}/{self.total}")
         self._run(update)
 
     def close(self):
@@ -248,5 +227,7 @@ class ModProgressDialog:
             return
         self._closed = True
         def update():
-            self.win.destroy()
+            self.popover.popdown()
+            if self.popover.get_parent():
+                self.popover.unparent()
         self._run(update)
