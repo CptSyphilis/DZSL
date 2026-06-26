@@ -79,6 +79,7 @@ DEFAULT_CFG = {
     "close_on_launch": True,
     "download_max_chunks": 8,
     "download_speed_kbps": 0,
+    "download_backend": "auto",
 }
 
 def load_cfg():

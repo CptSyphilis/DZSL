@@ -129,6 +129,26 @@ class SettingsView:
         # ── DOWNLOAD ──
         dl = card("DOWNLOAD")
 
+        backend_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        backend_row.set_valign(Gtk.Align.CENTER)
+        bvbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        bvbox.set_hexpand(True)
+        blbl = Gtk.Label(label="Download backend")
+        blbl.add_css_class("settings-field-label"); blbl.set_halign(Gtk.Align.START)
+        bvbox.append(blbl)
+        bnote = Gtk.Label(label="auto = DepotDownloader if available, else Steam")
+        bnote.add_css_class("settings-note"); bnote.set_halign(Gtk.Align.START)
+        bvbox.append(bnote)
+        backend_row.append(bvbox)
+        _backend_opts = ["auto", "depot", "steam"]
+        backend_store = Gtk.StringList.new(_backend_opts)
+        backend_dd = Gtk.DropDown.new(backend_store, None)
+        cur = self.cfg.get("download_backend", "auto")
+        backend_dd.set_selected(_backend_opts.index(cur) if cur in _backend_opts else 0)
+        backend_dd.connect("notify::selected", lambda w, _: self.cfg.update({"download_backend": _backend_opts[w.get_selected()]}))
+        backend_row.append(backend_dd)
+        dl.append(backend_row)
+
         def spin_row(body, label, key, lo, hi, step, note=None, sensitive=True):
             row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
             row.set_valign(Gtk.Align.CENTER)

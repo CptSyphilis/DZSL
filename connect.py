@@ -621,9 +621,15 @@ class Connector:
         if progress and progress.is_cancelled():
             return False, "cancelled"
 
+        backend = self.cfg.get("download_backend", "auto")
         depot_bin = self._depotdownloader_path()
         username = self._get_steam_username()
-        use_depot = bool(depot_bin and username)
+        if backend == "depot":
+            use_depot = True
+        elif backend == "steam":
+            use_depot = False
+        else:  # auto
+            use_depot = bool(depot_bin and username)
         if not use_depot:
             notify_check_steam()
 
