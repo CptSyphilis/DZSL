@@ -150,7 +150,6 @@ def is_steam_running():
             if _is_steam_client_process(pid):
                 return True
 
-    # Flatpak Steam detection
     try:
         res = subprocess.run(
             ["flatpak", "ps", "--columns=application"],

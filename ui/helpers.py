@@ -270,7 +270,7 @@ def notify_check_steam():
     try:
         subprocess.run(
             ["notify-send", "-a", "DZSL", "DZSL", "Check Steam — it may be waiting for you to confirm a Workshop subscription."],
-            capture_output=True, timeout=2,
+            capture_output=True, timeout=6,
         )
     except (OSError, subprocess.TimeoutExpired):
         pass

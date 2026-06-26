@@ -32,9 +32,6 @@ class ModProgressDialog:
         self.current_fraction  = 0.0
         self.current_size_text = ""
 
-        # Popover is unparented until main.py attaches it to the status-bar
-        # arrow button and pops it up — this lets the panel "grow out of"
-        # the bottom-right corner instead of floating as a separate window.
         self.popover = Gtk.Popover()
         self.popover.add_css_class("dl-toast")
         self.popover.set_position(Gtk.PositionType.TOP)

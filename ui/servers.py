@@ -521,7 +521,7 @@ class ServersView:
 
     def _fetch_thread(self):
         try:
-            r = requests.get(API_URL, headers={"User-Agent": "DZSL/1.0"}, timeout=20)
+            r = requests.get(API_URL, headers={"User-Agent": "DZSL/1.0"}, timeout=120)
             data = r.json()
             self.all_servers = data if isinstance(data, list) else data.get("result", data.get("servers", data.get("data", [])))
             _filter_state["servers"] = self.all_servers

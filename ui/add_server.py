@@ -29,6 +29,7 @@ class AddServerView:
             clipboard = display.get_clipboard()
             def on_text(clip, result):
                 try:
+
                     text = clip.read_text_finish(result).strip()
                     if ":" in text:
                         parts = text.rsplit(":", 1)
@@ -36,7 +37,9 @@ class AddServerView:
                         self.pt_e.set_text(parts[1])
                     else:
                         self.ip_e.set_text(text)
-                except: pass
+                except:
+                    pass
+
             clipboard.read_text_async(None, on_text)
         paste_btn.connect("clicked", do_paste)
         box.append(paste_btn)
@@ -58,10 +61,12 @@ class AddServerView:
         if not ip: self.res.set_text("Enter an IP address."); return
         self.res.set_text("Querying…")
         def q():
+            
             try:
                 d = requests.get(f"https://dayzsalauncher.com/api/v1/query/{ip}/{pt}", timeout=8).json().get("result", {})
                 self._queried = {"ip": ip, "port": int(pt), "name": d.get("name", f"{ip}:{pt}"), "map": d.get("map", "?"), "players": d.get("players", 0), "maxPlayers": d.get("maxPlayers", 0), "mods": d.get("mods", []), "firstPersonOnly": d.get("firstPersonOnly", False)}
                 GLib.idle_add(self.res.set_text, f"Found: {self._queried['name']}")
+            
             except:
                 self._queried = {"ip": ip, "port": int(pt), "name": self.nm_e.get_text() or f"{ip}:{pt}", "map": "?", "players": 0, "maxPlayers": 0, "mods": [], "firstPersonOnly": False}
                 GLib.idle_add(self.res.set_text, "Could not query — will save manually.")

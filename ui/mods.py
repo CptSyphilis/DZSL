@@ -107,7 +107,7 @@ class ModsView:
                     for i, mid in enumerate(ids): pd[f"publishedfileids[{i}]"] = mid
                     details = requests.post(
                         "https://api.steampowered.com/ISteamRemoteStorage/GetPublishedFileDetails/v1/",
-                        data=pd, timeout=15,
+                        data=pd, timeout=120,
                     ).json().get("response", {}).get("publishedfiledetails", [])
                     for d in details:
                         mid = str(d.get("publishedfileid", ""))
@@ -172,7 +172,7 @@ class ModsView:
             try:
                 ids = [m["id"] for m in mods]; pd = {"itemcount": len(ids)}
                 for i, mid in enumerate(ids): pd[f"publishedfileids[{i}]"] = mid
-                for d in requests.post("https://api.steampowered.com/ISteamRemoteStorage/GetPublishedFileDetails/v1/", data=pd, timeout=15).json().get("response", {}).get("publishedfiledetails", []):
+                for d in requests.post("https://api.steampowered.com/ISteamRemoteStorage/GetPublishedFileDetails/v1/", data=pd, timeout=120).json().get("response", {}).get("publishedfiledetails", []):
                     cid = d.get("creator", ""); mn = d.get("title", d.get("publishedfileid", ""))
                     if cid: creators.setdefault(cid, []).append(mn)
             except: pass
