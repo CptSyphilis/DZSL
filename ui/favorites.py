@@ -20,7 +20,7 @@ class ListView:
         self.add_server_cb = add_server_cb
         self.list_box = None
         self._ping_generation = 0
-        self._expand_tracker = [None]  # shared accordion state for ServerRow widgets
+        self._expand_tracker = [None]
 
     def build(self):
         tb = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
@@ -53,13 +53,13 @@ class ListView:
 
     def _populate(self, box, servers):
         clear_box(box)
-        self._expand_tracker[0] = None  # rows are being recreated, drop stale reference
+        self._expand_tracker[0] = None
         if not servers:
             el = Gtk.Label(label=self.empty_msg)
             el.add_css_class("empty"); el.set_justify(Gtk.Justification.CENTER)
             el.set_margin_top(80); box.append(el)
             return
-        played_lookup = recent_map()  # computed once for the whole list, not per row
+        played_lookup = recent_map()
         for s in servers:
             is_fav = any(f.get("ip") == s.get("ip") and f.get("port") == s.get("port") for f in self.favorites)
             box.append(ServerRow(

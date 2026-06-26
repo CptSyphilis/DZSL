@@ -267,10 +267,6 @@ def subscribed_mod_ids_from_server(server, cfg=None):
     return [mid for mid in mod_ids_from_server(server) if mod_subscribed(cfg, mid)]
 
 def notify_check_steam():
-    """Best-effort: nudge the user to check Steam for a Workshop dependency
-    prompt (e.g. "subscribe to required items?"). Wayland compositors (e.g.
-    COSMIC) don't allow one app to force-focus another app's window, so a
-    desktop notification is used instead of trying to raise Steam directly."""
     try:
         subprocess.run(
             ["notify-send", "-a", "DZSL", "DZSL", "Check Steam — it may be waiting for you to confirm a Workshop subscription."],

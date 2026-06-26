@@ -8,10 +8,6 @@ FILTERS_FILE = os.path.expanduser("~/.config/dzsl/filters.json")
 os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
 
 def detect_steam_root():
-    """Detect the Steam *library* root that contains the DayZ installation.
-    Prefers the library that actually has steamapps/common/DayZ .
-    Searches candidate paths + any additional libraries listed in Steam\'s libraryfolders.vdf .
-    """
     candidates = [
         os.path.expanduser("~/.local/share/Steam"),
         os.path.expanduser("~/.steam/steam"),
@@ -43,17 +39,14 @@ def detect_steam_root():
                     libs.append(p)
         except Exception:
             pass
-    # Prefer a lib that has both the manifest and the actual game files
     for p in libs:
         if (os.path.isfile(os.path.join(p, "steamapps", "appmanifest_221100.acf"))
                 and os.path.isdir(os.path.join(p, "steamapps", "common", "DayZ"))):
             return p
-    # Next: a lib with either signal (interrupted install / stale manifest)
     for p in libs:
         if (os.path.isfile(os.path.join(p, "steamapps", "appmanifest_221100.acf"))
                 or os.path.isdir(os.path.join(p, "steamapps", "common", "DayZ"))):
             return p
-    # Fallback: first one that looks like a Steam library (has steamapps)
     for p in libs:
         if os.path.isdir(os.path.join(p, "steamapps")):
             return p
@@ -77,10 +70,10 @@ DEFAULT_CFG = {
     "script_debug":  False,
     "skip_battleye": False,
     "close_on_launch": True,
-    "download_max_chunks": 8,
+    "download_max_chunks": 1,
     "download_speed_kbps": 0,
-    "download_backend": "auto",
-    "download_parallel": 3,
+    "download_backend": "steam",
+    "download_parallel": 1,
     "window_width":  1280,
     "window_height": 780,
     "window_maximized": True,
@@ -167,8 +160,7 @@ def is_steam_running():
             return True
     except Exception:
         pass
-
-    # Broader pgrep for any "steam" in cmdline (filter with _is_steam_client_process to exclude steamcmd and validate client)
+        
     try:
         res = subprocess.run(
             ["pgrep", "-f", "steam"],
@@ -181,7 +173,6 @@ def is_steam_running():
     except Exception:
         pass
 
-    # Additional flatpak-specific pgrep (the actual process may show as bwrap or steam wrapper)
     try:
         res = subprocess.run(
             ["pgrep", "-f", "com.valvesoftware.Steam|flatpak.*steam"],

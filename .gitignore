@@ -47,3 +47,8 @@ files.zip
 readthis.txt
 .claude/settings.local.json
 .claude/settings.local.json
+assets/dzsl-bg.svg
+.gitignore
+assets/dzsl-bg.png
+assets/build_bg.py
+notes.txt

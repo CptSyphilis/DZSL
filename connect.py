@@ -475,7 +475,6 @@ class Connector:
         self._forward_steam_uri("steam://open/downloads")
 
     def _forward_steam_uri(self, uri):
-        """Send a steam:// URI to the running Steam client (never xdg-open — that opens a browser)."""
         return forward_steam_uri(uri)
 
     def _mod_download_timeout(self, nbytes):
@@ -535,7 +534,7 @@ class Connector:
             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
             prev_pct = 0.0
             last_lines = []
-            speed_window = []  # list of (timestamp, bytes_done) for sliding window
+            speed_window = []
             WINDOW_SECS = 4.0
             for line in proc.stdout:
                 line = line.strip()
@@ -566,9 +565,6 @@ class Connector:
                                 GLib.idle_add(progress.set_speed, self._format_size(bps) + "/s")
                     prev_pct = pct
                 elif progress:
-                    # Not a percentage line (e.g. "Got licenses…", "Got AppInfo…") —
-                    # still show it so the dialog doesn't look frozen before the
-                    # first % update arrives.
                     GLib.idle_add(progress.set_hint, f"{mod_name}: {line}")
                 if progress and progress.is_cancelled():
                     proc.terminate()
@@ -610,9 +606,11 @@ class Connector:
         mid = str(mod_id)
         log.warning("Auto-subscribe unresponsive for %s (%s) — opening Workshop page for manual subscribe", mod_name, mid)
         self.set_status(f"Opened Steam Workshop page for {mod_name} — click Subscribe there to continue.")
-        self._forward_steam_uri(f"steam://url/CommunityFilePage/{mid}")
 
-    def _sync_steam_subscriptions(self, mod_ids, start_if_needed=True):
+        import webbrowser
+webbrowser.open(f"https://steamcommunity.com/sharedfiles/filedetails/?id={mid}")
+
+    def _sync_steam_subscriptions(self, mod_ids, start_if_needed=True)
         if not mod_ids:
             return
         if start_if_needed and not self.is_steam_running():
@@ -662,11 +660,6 @@ class Connector:
             notify_check_steam()
 
         if use_depot:
-            # Multiple DepotDownloader processes logging into the same Steam
-            # account at once collide and cause cascading "Lost connection to
-            # Steam. Reconnecting" / "A task was canceled" failures across all
-            # of them — confirmed directly (11/11 mods failed at parallel=3,
-            # the 12th succeeded once it ran alone). Must stay sequential.
             n_parallel = 1
         else:
             n_parallel = max(1, int(self.cfg.get("download_parallel", 3)))
@@ -728,7 +721,7 @@ class Connector:
         self.set_status(f"Waiting for {mod_name} download…")
         start = time.time()
         step = 2
-        steps = 600 // step  # 10 minutes
+        steps = 3600 // step    # 1 hour
         fallback_opened = False
         for i in range(steps):
             if progress and progress.is_cancelled():
@@ -738,9 +731,6 @@ class Connector:
             if mod_installed(self.cfg, mid):
                 log.info("%s installed after %ds", mod_name, int(time.time() - start))
                 return True
-            # workshop_log.txt reflects a subscribe instantly; appworkshop_*.acf
-            # (mod_subscribed) lags behind it — check both so the fallback-page
-            # and resend logic below don't act as if nothing happened yet.
             subscribed = mod_subscribed(self.cfg, mid) or mod_subscribed_per_steam_log(mid)
             if progress and progress.continue_requested():
                 if subscribed:
@@ -753,14 +743,11 @@ class Connector:
             elapsed = i * step
             opened_fallback_now = False
             if not fallback_opened and elapsed >= 10 and not subscribed:
-                # Steam gave no sign of life (not even a subscription) within 10s —
-                # subscribe/installworkshop URIs are silently dropped by current
-                # Steam clients, so fall back to the Workshop page for a manual click.
                 fallback_opened = True
                 opened_fallback_now = True
                 self._open_workshop_page(mid, mod_name)
                 notify_check_steam()
-            elif elapsed and elapsed % 30 == 0 and not subscribed:  # keep retrying in case Steam fixes the verbs
+            elif elapsed and elapsed % 30 == 0 and not subscribed:
                 log.warning("No progress on %s after %ds, resending subscribe URI", mod_name, elapsed)
                 self._subscribe_mod_steam(mid, mod_name)
             if progress:

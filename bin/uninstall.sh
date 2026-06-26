@@ -13,9 +13,11 @@ if [ "$TARGET" = "$(_resolve "/")" ] || [ "$TARGET" = "$(_resolve "$HOME")" ]; t
     exit 1
 fi
 
-echo "DZSL Uninstaller"
-echo ""
-echo "Will remove:"
+echo "╔══════════════════════════════════╗"
+echo "║   DZSL - DayZ Server List        ║"
+echo "║   Linux Uninstaller              ║"
+echo "╚══════════════════════════════════╝"
+echo "
 echo "  $INSTALL_DIR"
 echo "  $CONFIG_DIR"
 echo "  $DESKTOP"

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 import os
 import sys
 
@@ -11,8 +10,6 @@ def _wayland_session():
 def _configure_display():
     if os.environ.get("DZSL_USE_WAYLAND") == "1":
         return
-    # On any Wayland desktop, force X11 (via XWayland). Overrides DE defaults like
-    # GDK_BACKEND=wayland,x11 and avoids compositor disconnects on COSMIC, GNOME, KDE, etc.
     if _wayland_session() or os.environ.get("DZSL_USE_X11") == "1":
         os.environ["GDK_BACKEND"] = "x11"
 
