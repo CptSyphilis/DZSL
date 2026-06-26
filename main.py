@@ -27,7 +27,7 @@ gi.require_version('Adw', '1')
 from gi.repository import Gtk, Adw, GLib, Gdk
 import threading, subprocess, time, os
 
-from config import load_cfg, save_json, load_json, FAVS_FILE, RECENT_FILE, is_steam_running, find_corrupt_mods
+from config import load_cfg, save_cfg, save_json, load_json, FAVS_FILE, RECENT_FILE, is_steam_running, find_corrupt_mods
 from css import CSS
 from connect import Connector, launch_steam
 from ui.servers import ServersView
@@ -52,10 +52,14 @@ class DZSL(Adw.Application):
     def on_activate(self, app):
         self.win = Adw.ApplicationWindow(application=app)
         self.win.set_title("DZSL")
-        self.win.set_default_size(1280, 780)
+        w = self.cfg.get("window_width", 1280)
+        h = self.cfg.get("window_height", 780)
+        self.win.set_default_size(w, h)
         self.win.set_decorated(True)
         self.win.set_resizable(True)
-        self.win.maximize()
+        if self.cfg.get("window_maximized", True):
+            self.win.maximize()
+        self.win.connect("close-request", self._on_close_request)
 
         script_dir = os.path.dirname(os.path.abspath(__file__))
         icon_path = os.path.join(script_dir, "assets", "icon.png")
@@ -90,7 +94,6 @@ class DZSL(Adw.Application):
             ("favorites", "favorites"),
             ("recent", "recent"),
             ("mods", "mods"),
-            ("add", "add server"),
             ("settings", "settings"),
         ]:
             b = Gtk.Button(label=label)
@@ -322,17 +325,35 @@ class DZSL(Adw.Application):
         if view == "welcome":
             self._build_welcome()
         elif view == "favorites":
-            ListView(self.panel, self.favorites, "No saved servers yet.\nUse the server browser or Add Server.", self.favorites, self.connector.connect, self.toggle_fav, self.connector.load_mods, self.set_status).build()
+            ListView(self.panel, self.favorites, "No saved servers yet.", self.favorites, self.connector.connect, self.toggle_fav, self.connector.load_mods, self.set_status,
+                     add_server_cb=lambda: self._open_add_server_dialog()).build()
         elif view == "recent":
             ListView(self.panel, load_json(RECENT_FILE), "No recently joined servers.", self.favorites, self.connector.connect, self.toggle_fav, self.connector.load_mods, self.set_status).build()
         elif view == "servers":
             ServersView(self.panel, self.cfg, self.favorites, self.connector.connect, self.toggle_fav, self.set_status, self.connector.load_mods).build()
-        elif view == "add":
-            AddServerView(self.panel, self.favorites, self.set_status).build()
         elif view == "mods":
             ModsView(self.panel, self.cfg, self.set_status).build()
         elif view == "settings":
             SettingsView(self.panel, self.cfg, self.set_status, lambda: self.show_view("settings")).build()
+
+    def _open_add_server_dialog(self):
+        dlg = Adw.Dialog()
+        dlg.set_title("Add Server")
+        dlg.set_content_width(420)
+        dlg.set_content_height(380)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        AddServerView(box, self.favorites, self.set_status).build()
+        dlg.set_child(box)
+        dlg.present(self.win)
+
+    def _on_close_request(self, win):
+        maximized = win.is_maximized()
+        self.cfg["window_maximized"] = maximized
+        if not maximized:
+            self.cfg["window_width"]  = win.get_width()
+            self.cfg["window_height"] = win.get_height()
+        save_cfg(self.cfg)
+        return False
 
     def set_downloading(self, active, progress=None):
         def update():
@@ -365,7 +386,7 @@ class DZSL(Adw.Application):
     def _show_active_download(self, *_):
         p = getattr(self, "_active_progress", None)
         if p and not p._closed:
-            p.win.present(self.win)
+            p.win.present()
 
     def _build_welcome(self):
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)

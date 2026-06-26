@@ -6,22 +6,23 @@ from gi.repository import Gtk, Adw, GLib
 
 class ModProgressDialog:
     SUBSCRIBE_END = 0.20
-    DOWNLOAD_END = 0.92
+    DOWNLOAD_END  = 0.92
 
     def __init__(self, parent, heading, mod_ids, names, on_cancel=None,
                  on_open_downloads=None):
-        self._cancel = threading.Event()
+        self._cancel   = threading.Event()
         self._continue = threading.Event()
-        self._closed = False
+        self._closed   = False
         self.on_cancel = on_cancel
         self.on_open_downloads = on_open_downloads
-        self.mod_ids = list(mod_ids)
+        self.mod_ids   = list(mod_ids)
 
-        self._parent = parent
-        self.win = Adw.Dialog()
+        self.win = Adw.Window()
         self.win.set_title(heading)
-        self.win.set_content_width(480)
-        self.win.set_content_height(420)
+        self.win.set_default_size(500, 520)
+        self.win.set_transient_for(parent)
+        self.win.set_modal(False)
+        self.win.connect("close-request", self._on_close_request)
 
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         root.set_margin_top(20)
@@ -57,18 +58,36 @@ class ModProgressDialog:
         scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         scroll.set_vexpand(True)
         self.list_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        self.rows = {}
+        self.rows     = {}
+        self.mod_bars = {}
         for mid in mod_ids:
-            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            row  = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
             mark = Gtk.Label(label="○")
             mark.set_width_chars(2)
+            info = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+            info.set_hexpand(True)
             name = Gtk.Label(label=names.get(mid, mid))
             name.set_halign(Gtk.Align.START)
             name.set_hexpand(True)
             name.set_ellipsize(3)
+            info.append(name)
+            bar_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+            bar = Gtk.ProgressBar()
+            bar.set_hexpand(True)
+            bar.set_fraction(0.0)
+            bar.set_show_text(False)
+            bar.set_visible(False)
+            pct = Gtk.Label(label="")
+            pct.add_css_class("mod-dl-pct")
+            pct.set_width_chars(5)
+            pct.set_visible(False)
+            bar_row.append(bar)
+            bar_row.append(pct)
+            info.append(bar_row)
             row.append(mark)
-            row.append(name)
-            self.rows[mid] = mark
+            row.append(info)
+            self.rows[mid]     = mark
+            self.mod_bars[mid] = (bar, pct)
             self.list_box.append(row)
         scroll.set_child(self.list_box)
         root.append(scroll)
@@ -89,20 +108,24 @@ class ModProgressDialog:
         btn_row.set_margin_top(4)
 
         self.stop_btn = Gtk.Button(label="Stop Download")
-        self.stop_btn.add_css_class("btn-ghost")
+        self.stop_btn.add_css_class("btn-danger")
         self.stop_btn.connect("clicked", self._on_stop)
         btn_row.append(self.stop_btn)
 
-        close_btn = Gtk.Button(label="Close")
-        close_btn.add_css_class("btn-ghost")
-        close_btn.connect("clicked", self._on_close)
-        btn_row.append(close_btn)
+        hide_btn = Gtk.Button(label="Hide")
+        hide_btn.add_css_class("btn-ghost")
+        hide_btn.connect("clicked", lambda _: self.win.hide())
+        btn_row.append(hide_btn)
 
         root.append(btn_row)
 
         self.win.set_child(root)
-        self.win.connect("closed", self._on_dialog_closed)
-        self.win.present(parent)
+        self.win.present()
+
+    def _on_close_request(self, win):
+        # Window X button: hide, keep downloading
+        win.hide()
+        return True  # prevent destroy
 
     def _run(self, fn):
         GLib.idle_add(fn)
@@ -134,14 +157,6 @@ class ModProgressDialog:
     def _on_stop(self, *_):
         self.request_cancel()
 
-    def _on_close(self, *_):
-        self.request_cancel()
-        self.close()
-
-    def _on_dialog_closed(self, dialog):
-        self.request_cancel()
-        self._closed = True
-
     def set_speed(self, text):
         def update():
             if self._closed:
@@ -171,15 +186,15 @@ class ModProgressDialog:
 
     def _download_fraction(self, done, total, subscribed=0):
         total = max(total, 1)
-        downloaded_frac = done / total
-        subscribed_only = max(0, subscribed - done) / total
+        downloaded_frac  = done / total
+        subscribed_only  = max(0, subscribed - done) / total
         span = self.DOWNLOAD_END - self.SUBSCRIBE_END
         return self.SUBSCRIBE_END + span * (downloaded_frac + subscribed_only * 0.35)
 
     def set_subscribe_progress(self, done, total, subscribed=0):
         total = max(total, 1)
         opened_frac = (done / total) * self.SUBSCRIBE_END
-        sub_frac = (subscribed / total) * self.SUBSCRIBE_END
+        sub_frac    = (subscribed / total) * self.SUBSCRIBE_END
         frac = max(opened_frac, sub_frac)
         msg = f"Subscribing via Steam… {done}/{total}"
         if subscribed:
@@ -188,20 +203,29 @@ class ModProgressDialog:
 
     def set_download_progress(self, done, total, subscribed=0, elapsed=0):
         total = max(total, 1)
-        done = min(max(done, 0), total)
-        frac = self._download_fraction(done, total, subscribed)
-        msg = f"Downloaded {done}/{total}"
+        done  = min(max(done, 0), total)
+        frac  = self._download_fraction(done, total, subscribed)
+        msg   = f"Downloaded {done}/{total}"
         if subscribed > done:
             msg += f", subscribed {subscribed}/{total}"
         if done < total:
-            if subscribed <= done and elapsed:
-                msg += f" — waiting for Steam ({elapsed}s)"
-            elif elapsed:
+            if elapsed:
                 msg += f" — waiting for Steam ({elapsed}s)"
         self.set_phase(msg, frac)
 
     def set_setup_progress(self, text):
         self.set_phase(text, 0.95)
+
+    def set_mod_progress(self, mid, fraction):
+        def update():
+            if self._closed or mid not in self.mod_bars:
+                return
+            bar, pct = self.mod_bars[mid]
+            bar.set_fraction(max(0.0, min(1.0, fraction)))
+            pct.set_text(f"{int(fraction * 100)}%")
+            bar.set_visible(True)
+            pct.set_visible(True)
+        self._run(update)
 
     def mark_subscribed(self, mid):
         def update():
@@ -213,13 +237,16 @@ class ModProgressDialog:
         def update():
             if mid in self.rows:
                 self.rows[mid].set_text("✓")
+            if mid in self.mod_bars:
+                bar, pct = self.mod_bars[mid]
+                bar.set_visible(False)
+                pct.set_visible(False)
         self._run(update)
 
     def close(self):
         if self._closed:
             return
         self._closed = True
-
         def update():
-            self.win.force_close()
+            self.win.destroy()
         self._run(update)

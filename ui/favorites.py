@@ -8,7 +8,7 @@ from ui.ping import ping_servers
 
 class ListView:
     def __init__(self, panel, servers, empty_msg, favorites, connect_cb, fav_cb,
-                 load_mods_cb=None, set_status=None):
+                 load_mods_cb=None, set_status=None, add_server_cb=None):
         self.panel      = panel
         self.servers    = servers
         self.empty_msg  = empty_msg
@@ -17,6 +17,7 @@ class ListView:
         self.fav_cb     = fav_cb
         self.load_mods_cb = load_mods_cb
         self.set_status = set_status or (lambda _msg: None)
+        self.add_server_cb = add_server_cb
         self.list_box = None
         self._ping_generation = 0
         self._expand_tracker = [None]  # shared accordion state for ServerRow widgets
@@ -29,6 +30,10 @@ class ListView:
         rb = Gtk.Button(label="Refresh"); rb.add_css_class("toolbar-btn")
         rb.connect("clicked", lambda b: self._populate(box, self.servers))
         tb.append(rb)
+        if self.add_server_cb:
+            ab = Gtk.Button(label="+ Add Server"); ab.add_css_class("toolbar-btn"); ab.add_css_class("accent")
+            ab.connect("clicked", lambda _: self.add_server_cb())
+            tb.append(ab)
         self.panel.append(tb)
 
         scroll = Gtk.ScrolledWindow(); scroll.set_vexpand(True)

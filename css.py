@@ -109,6 +109,7 @@ window { background: #0d0d0d; }
 .mod-row:hover { background: #161616; }
 .mod-name { color: #ccc; font-size: 12px; font-weight: 600; }
 .mod-id   { color: #333; font-size: 10px; font-family: monospace; }
+.mod-dl-pct { color: #5a8aaa; font-size: 10px; font-family: monospace; }
 
 /* Empty state */
 .empty { color: #2a2a2a; font-size: 14px; font-style: italic; }

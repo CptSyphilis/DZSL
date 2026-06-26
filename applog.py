@@ -19,13 +19,17 @@ def get_logger(name):
         os.makedirs(LOG_DIR, exist_ok=True)
         logger.setLevel(_level)
         logger.propagate = False
-        handler = RotatingFileHandler(
+        fmt = logging.Formatter(
+            "%(asctime)s %(levelname)-7s [%(name)s] %(message)s",
+            datefmt="%H:%M:%S",
+        )
+        file_handler = RotatingFileHandler(
             os.path.join(LOG_DIR, f"{name}.log"), maxBytes=2 * 1024 * 1024, backupCount=3,
         )
-        handler.setFormatter(logging.Formatter(
-            "%(asctime)s %(levelname)-7s %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S",
-        ))
-        logger.addHandler(handler)
+        file_handler.setFormatter(fmt)
+        logger.addHandler(file_handler)
+        stream_handler = logging.StreamHandler()
+        stream_handler.setFormatter(fmt)
+        logger.addHandler(stream_handler)
         _configured.add(name)
     return logger

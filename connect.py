@@ -1,4 +1,5 @@
 import subprocess, threading, os, re, time, shlex
+import concurrent.futures
 import requests
 import gi
 gi.require_version('Gtk', '4.0')
@@ -154,7 +155,7 @@ class Connector:
     def _start(self, server, launch=True, password=None):
         if self._busy:
             log.info("Ignoring connect/load-mods click — already busy")
-            self.set_status("Already connecting/loading mods — please wait…")
+            self.set_status("Download in progress — wait for it to finish before connecting.")
             return
         self._busy = True
         self._download_scheduled = False
@@ -327,6 +328,15 @@ class Connector:
             on_open_downloads=self._open_steam_downloads,
         )
         self.set_downloading(True, progress)
+        try:
+            subprocess.Popen(
+                ["notify-send", "-a", "DZSL", "-u", "normal",
+                 "Downloading mods…",
+                 f"Downloading {len(queue)} mod(s). Don't launch DayZ until complete."],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+        except OSError:
+            pass
         threading.Thread(
             target=self._dl_and_finish,
             args=(queue, sizes, server, mod_names, name, launch, password, progress),
@@ -526,27 +536,36 @@ class Connector:
         try:
             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
             prev_pct = 0.0
-            prev_bytes = 0.0
-            prev_time = time.time()
+            last_lines = []
+            speed_window = []  # list of (timestamp, bytes_done) for sliding window
+            WINDOW_SECS = 4.0
             for line in proc.stdout:
                 line = line.strip()
                 if not line:
                     continue
                 log.debug("depot: %s", line)
+                last_lines.append(line)
+                if len(last_lines) > 8:
+                    last_lines.pop(0)
                 m = re.match(r'\s*(\d+\.\d+)%', line)
                 if m:
                     pct = float(m.group(1))
                     now = time.time()
-                    elapsed = now - prev_time
                     if progress:
-                        GLib.idle_add(progress.set_hint, f"{pct:.0f}%")
-                    if size_bytes and elapsed >= 1.0:
+                        GLib.idle_add(progress.set_mod_progress, mid, pct / 100.0)
+                    if size_bytes:
                         bytes_done = pct / 100.0 * size_bytes
-                        bps = (bytes_done - prev_bytes) / elapsed
-                        if bps >= 0:
-                            GLib.idle_add(progress.set_speed, self._format_size(bps) + "/s")
-                        prev_bytes = bytes_done
-                        prev_time = now
+                        speed_window.append((now, bytes_done))
+                        # drop samples older than WINDOW_SECS
+                        cutoff = now - WINDOW_SECS
+                        while len(speed_window) > 1 and speed_window[0][0] < cutoff:
+                            speed_window.pop(0)
+                        if len(speed_window) >= 2:
+                            dt = speed_window[-1][0] - speed_window[0][0]
+                            db = speed_window[-1][1] - speed_window[0][1]
+                            if dt >= 0.5 and db >= 0:
+                                bps = db / dt
+                                GLib.idle_add(progress.set_speed, self._format_size(bps) + "/s")
                     prev_pct = pct
                 if progress and progress.is_cancelled():
                     proc.terminate()
@@ -560,7 +579,12 @@ class Connector:
                 log.info("DepotDownloader done: %s (%s)", mod_name, mid)
                 return True, ""
             self._cleanup_partial_mod(dest_dir, mid)
-            return False, f"DepotDownloader exited {proc.returncode}"
+            tail = "\n".join(last_lines[-3:]) if last_lines else ""
+            err_msg = f"DepotDownloader exited {proc.returncode}"
+            if tail:
+                err_msg += f":\n{tail}"
+            log.error("DepotDownloader failed for %s: %s", mod_name, err_msg)
+            return False, err_msg
         except Exception as exc:
             log.error("DepotDownloader error for %s: %s", mid, exc)
             self._cleanup_partial_mod(dest_dir, mid)
@@ -582,6 +606,7 @@ class Connector:
     def _open_workshop_page(self, mod_id, mod_name):
         mid = str(mod_id)
         log.warning("Auto-subscribe unresponsive for %s (%s) — opening Workshop page for manual subscribe", mod_name, mid)
+        self.set_status(f"Opened Steam Workshop page for {mod_name} — click Subscribe there to continue.")
         self._forward_steam_uri(f"steam://url/CommunityFilePage/{mid}")
 
     def _sync_steam_subscriptions(self, mod_ids, start_if_needed=True):
@@ -633,17 +658,20 @@ class Connector:
         if not use_depot:
             notify_check_steam()
 
-        for idx, mid in enumerate(pending, start=1):
+        n_parallel = max(1, int(self.cfg.get("download_parallel", 3)))
+        log.info("Downloading %d mod(s) with up to %d in parallel", len(pending), n_parallel)
+        if progress:
+            progress.set_action_prompt(f"Downloading {len(pending)} mod(s)…")
+
+        done_lock = threading.Lock()
+        errors = []
+
+        def download_one(mid):
             if progress and progress.is_cancelled():
-                log.info("Mod download cancelled before [%d/%d]", idx, len(pending))
-                return False, "cancelled"
+                return
             mod_name = names.get(mid, mid)
-            log.info("[%d/%d] Downloading: %s (%s)", idx, len(pending), mod_name, mid)
+            log.info("Downloading: %s (%s)", mod_name, mid)
             self.set_status(f"Downloading {mod_name}…")
-            if progress:
-                progress.set_action_prompt(f"Downloading:\n{mod_name}")
-                progress.set_hint("")
-                progress.clear_continue()
 
             if use_depot:
                 dest = os.path.join(workshop_dir(self.cfg), mid)
@@ -656,13 +684,32 @@ class Connector:
                 err = "" if ok else f"Timeout waiting for {mod_name}"
 
             if not ok:
-                log.error("[%d/%d] Failed %s: %s", idx, len(pending), mod_name, err)
-                return False, err
+                log.error("Failed %s: %s", mod_name, err)
+                with done_lock:
+                    errors.append(err)
+                return
             self._mark_mod_progress(progress, mid)
-            done += 1
+            with done_lock:
+                done_ref[0] += 1
+                current_done = done_ref[0]
             if progress:
-                progress.set_download_progress(done, total)
-            log.info("[%d/%d] Done: %s", idx, len(pending), mod_name)
+                progress.set_download_progress(current_done, total)
+            log.info("Done: %s", mod_name)
+
+        done_ref = [done]
+        with concurrent.futures.ThreadPoolExecutor(max_workers=n_parallel) as ex:
+            futs = {ex.submit(download_one, mid): mid for mid in pending}
+            for fut in concurrent.futures.as_completed(futs):
+                try:
+                    fut.result()
+                except Exception as exc:
+                    mid = futs[fut]
+                    log.error("Unhandled error downloading %s: %s", mid, exc)
+                    with done_lock:
+                        errors.append(str(exc))
+
+        if errors:
+            return False, errors[0]
         return True, ""
 
     def _wait_for_mod_installed(self, mod_id, progress, mod_name, size_bytes=0):

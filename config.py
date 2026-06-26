@@ -80,6 +80,10 @@ DEFAULT_CFG = {
     "download_max_chunks": 8,
     "download_speed_kbps": 0,
     "download_backend": "auto",
+    "download_parallel": 3,
+    "window_width":  1280,
+    "window_height": 780,
+    "window_maximized": True,
 }
 
 def load_cfg():

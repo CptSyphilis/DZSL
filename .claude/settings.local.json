@@ -147,7 +147,9 @@
       "Bash(~/tools/depotdownloader/DepotDownloader -app 221100 -pubfile 1559212036 -username cptsyphilis -remember-password -dir /tmp/depot_test2)",
       "Bash(DISPLAY=:1 /usr/bin/python3 /mnt/Storage1tb/coding/DZSL/main.py)",
       "Bash(xxd /mnt/Storage1tb/SteamLibrary/steamapps/workshop/content/221100/3050117454/meta.cpp)",
-      "Bash(xxd /mnt/Storage1tb/SteamLibrary/steamapps/workshop/content/221100/3050117454/mod.cpp)"
+      "Bash(xxd /mnt/Storage1tb/SteamLibrary/steamapps/workshop/content/221100/3050117454/mod.cpp)",
+      "Bash(git fetch *)",
+      "Bash(git remote *)"
     ],
     "additionalDirectories": [
       "/mnt/Storage1tb/coding/DZSL"
