@@ -198,7 +198,7 @@ class Connector:
             return requests.get(
                 f"https://dayzsalauncher.com/api/v1/query/{ip}/{port}",
                 headers={"User-Agent": "DZSL/1.0"},
-                timeout=10,
+                timeout=120,
             ).json().get("result", {})
         except Exception:
             return {}
@@ -564,6 +564,7 @@ class Connector:
                                 bps = db / dt
                                 GLib.idle_add(progress.set_speed, self._format_size(bps) + "/s")
                     prev_pct = pct
+
                 elif progress:
                     GLib.idle_add(progress.set_hint, f"{mod_name}: {line}")
                 if progress and progress.is_cancelled():
@@ -571,7 +572,9 @@ class Connector:
                     proc.wait()
                     self._cleanup_partial_mod(dest_dir, mid)
                     return False, "cancelled"
+                
             proc.wait()
+
             if progress:
                 GLib.idle_add(progress.set_speed, "—")
             if proc.returncode == 0:
@@ -608,9 +611,11 @@ class Connector:
         self.set_status(f"Opened Steam Workshop page for {mod_name} — click Subscribe there to continue.")
 
         import webbrowser
-webbrowser.open(f"https://steamcommunity.com/sharedfiles/filedetails/?id={mid}")
+        webbrowser.open(f"https://steamcommunity.com/sharedfiles/filedetails/?id={mid}")
 
-    def _sync_steam_subscriptions(self, mod_ids, start_if_needed=True)
+
+    
+    def _sync_steam_subscriptions(self, mod_ids, start_if_needed=True): 
         if not mod_ids:
             return
         if start_if_needed and not self.is_steam_running():
@@ -624,7 +629,7 @@ webbrowser.open(f"https://steamcommunity.com/sharedfiles/filedetails/?id={mid}")
             mid = str(mid)
             self._subscribe_mod_steam(mid, mid)
 
-    def _subscribe_and_wait_mods(self, mod_ids, mod_names, sizes=None, progress=None):
+    def _subscribe_and_wait_mods(self, mod_ids, mod_names=None, progress=None, sizes=None):
         self._refresh_cfg()
         names = mod_names or {}
         total = len(mod_ids)
@@ -684,7 +689,9 @@ webbrowser.open(f"https://steamcommunity.com/sharedfiles/filedetails/?id={mid}")
                 )
             else:
                 self._subscribe_mod_steam(mid, mod_name)
-                ok = self._wait_for_mod_installed(mid, progress, mod_name)
+                ok = self._wait_for_mod_installed(mid, progress, mod_name, size_bytes=sizes.get(mid, 0) if sizes else 0
+                                                  )
+                
                 err = "" if ok else f"Timeout waiting for {mod_name}"
 
             if not ok:
@@ -723,31 +730,37 @@ webbrowser.open(f"https://steamcommunity.com/sharedfiles/filedetails/?id={mid}")
         step = 2
         steps = 3600 // step    # 1 hour
         fallback_opened = False
+
         for i in range(steps):
             if progress and progress.is_cancelled():
                 log.info("Wait for %s cancelled after %ds", mod_name, int(time.time() - start))
                 return False
+            
             self._refresh_cfg()
             if mod_installed(self.cfg, mid):
                 log.info("%s installed after %ds", mod_name, int(time.time() - start))
                 return True
+            
             subscribed = mod_subscribed(self.cfg, mid) or mod_subscribed_per_steam_log(mid)
             if progress and progress.continue_requested():
                 if subscribed:
                     log.info("User advanced past %s after %ds (subscription confirmed)", mod_name, int(time.time() - start))
                     progress.clear_continue()
                     return True
+                
                 log.warning("Next-mod click for %s ignored — not yet subscribed per Steam", mod_name)
                 progress.clear_continue()
                 progress.set_hint(f"Not subscribed yet in Steam — click Subscribe first for:\n{mod_name}")
-            elapsed = i * step
-            opened_fallback_now = False
-            if not fallback_opened and elapsed >= 10 and not subscribed:
-                fallback_opened = True
+                elapsed = i * step
+                opened_fallback_now = False
+                if not fallback_opened and elapsed >= 10 and not subscribed:
+                    fallback_opened = True
+
                 opened_fallback_now = True
                 self._open_workshop_page(mid, mod_name)
                 notify_check_steam()
-            elif elapsed and elapsed % 30 == 0 and not subscribed:
+                
+            elif elapsed and elapsed % 3600 == 0 and not subscribed:
                 log.warning("No progress on %s after %ds, resending subscribe URI", mod_name, elapsed)
                 self._subscribe_mod_steam(mid, mod_name)
             if progress:
@@ -772,9 +785,8 @@ webbrowser.open(f"https://steamcommunity.com/sharedfiles/filedetails/?id={mid}")
         return f"{nbytes / 1024 ** 3:.2f} GB"
 
     def _get_mod_size(self, mid):
-        """Return the on-disk size of a workshop mod (sum of all files)."""
         total = 0
-        for wd in workshop_dirs(self.cfg):
+        for wd in workshop_dir(self.cfg):
             p = os.path.join(wd, str(mid))
             if os.path.isdir(p):
                 for dirpath, _, filenames in os.walk(p):
@@ -798,7 +810,7 @@ webbrowser.open(f"https://steamcommunity.com/sharedfiles/filedetails/?id={mid}")
             response = requests.post(
                 "https://api.steampowered.com/ISteamRemoteStorage/GetPublishedFileDetails/v1/",
                 data=payload,
-                timeout=20,
+                timeout=120,
             ).json()
             for detail in response.get("response", {}).get("publishedfiledetails", []):
                 mid = str(detail.get("publishedfileid", ""))
@@ -823,8 +835,10 @@ webbrowser.open(f"https://steamcommunity.com/sharedfiles/filedetails/?id={mid}")
         mid = str(mod_id)
         if not progress:
             return
+        
         if mod_installed(self.cfg, mid):
             progress.mark_installed(mid)
+
         elif mod_subscribed(self.cfg, mid):
             progress.mark_subscribed(mid)
 
@@ -838,10 +852,11 @@ webbrowser.open(f"https://steamcommunity.com/sharedfiles/filedetails/?id={mid}")
                 progress.set_download_progress(0, total)
             self.set_status(f"Downloading {total} mods (smallest first)…")
 
-            ok, err = self._subscribe_and_wait_mods(
-                mod_ids, names, sizes=sizes, progress=progress,
-            )
+            ok, err = self._subscribe_and_wait_mods(self._subscribe_mod_steam(mid, mod_name)
+            ok = self._wait_for_mod_installed(
+                mid, progress, mod_name))
             self.set_downloading(False)
+
             if err == "cancelled" or self._download_cancelled(progress):
                 log.info("Mod download for %s cancelled by user", name)
                 self.set_status("Download cancelled.")
@@ -926,10 +941,6 @@ webbrowser.open(f"https://steamcommunity.com/sharedfiles/filedetails/?id={mid}")
         save_json(RECENT_FILE, recent[:20])
 
     def _close_app(self):
-        """Hide the DZSL window after successfully launching DayZ (if enabled), so
-        it gets out of the way while the game runs. The Python process (and its
-        background threads) stays alive; a daemon watcher thread polls for DayZ
-        to start and then exit, and restores the window once DayZ has closed."""
         if not self.cfg.get("close_on_launch", True):
             return
         if not self.win:
@@ -938,9 +949,6 @@ webbrowser.open(f"https://steamcommunity.com/sharedfiles/filedetails/?id={mid}")
         threading.Thread(target=self._watch_dayz_and_restore, daemon=True).start()
 
     def _watch_dayz_and_restore(self):
-        """Runs on a background daemon thread. Waits for DayZ to appear (giving up
-        after ~3 minutes if it never does), then waits for it to exit, then asks
-        the main thread to re-show the DZSL window."""
         started = False
         for _ in range(90):
             if self.is_dayz_running():
