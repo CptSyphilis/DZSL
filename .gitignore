@@ -43,3 +43,7 @@ config.ini
 CLAUDE.md
 /screenshots
 .env
+files.zip
+readthis.txt
+.claude/settings.local.json
+.claude/settings.local.json

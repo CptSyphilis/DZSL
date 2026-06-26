@@ -149,7 +149,9 @@
       "Bash(xxd /mnt/Storage1tb/SteamLibrary/steamapps/workshop/content/221100/3050117454/meta.cpp)",
       "Bash(xxd /mnt/Storage1tb/SteamLibrary/steamapps/workshop/content/221100/3050117454/mod.cpp)",
       "Bash(git fetch *)",
-      "Bash(git remote *)"
+      "Bash(git remote *)",
+      "Bash(pkill -f \"DepotDownloader.*2143128974\")",
+      "Bash(unzip -l /mnt/Storage1tb/coding/DZSL/files.zip)"
     ],
     "additionalDirectories": [
       "/mnt/Storage1tb/coding/DZSL"
