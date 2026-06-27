@@ -3,14 +3,17 @@ gi.require_version('Gtk', '4.0')
 from gi.repository import Gtk, GLib
 from config import DEFAULT_CFG, save_cfg
 from ui.helpers import forward_steam_uri, unsubscribe_mod_ids
+from ui.workshop_actions import WorkshopActionRunner
 import threading
 
 class SettingsView:
-    def __init__(self, panel, cfg, set_status, reload_cb):
+    def __init__(self, panel, cfg, set_status, reload_cb, set_downloading=None):
         self.panel      = panel
         self.cfg        = cfg
         self.set_status = set_status
         self.reload_cb  = reload_cb
+        self.set_downloading = set_downloading or (lambda *_: None)
+        self.workshop = WorkshopActionRunner(cfg, set_status, self.set_downloading)
 
     def build(self):
         scroll = Gtk.ScrolledWindow(); scroll.set_vexpand(True)
@@ -181,10 +184,10 @@ class SettingsView:
         # ── WORKSHOP ACTIONS ──
         ws = card("WORKSHOP ACTIONS")
 
-        vb = Gtk.Button(label="VERIFY ALL MODS VIA STEAM")
+        vb = Gtk.Button(label="VERIFY / REPAIR WORKSHOP MODS")
         vb.add_css_class("btn-ghost")
         vb.set_halign(Gtk.Align.START)
-        vb.connect("clicked", lambda b: self._steam_action("steam://validate/221100", "Verifying DayZ via Steam…"))
+        vb.connect("clicked", lambda b: self.workshop.verify_installed_mods())
         ws.append(vb)
 
         ub = Gtk.Button(label="UNSUBSCRIBE FROM ALL WORKSHOP MODS")

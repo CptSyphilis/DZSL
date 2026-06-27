@@ -27,7 +27,8 @@ import threading, subprocess, time, os
 
 from config import load_cfg, save_cfg, save_json, load_json, FAVS_FILE, RECENT_FILE, is_steam_running, find_corrupt_mods
 from css import CSS
-from connect import Connector, launch_steam
+from connect import Connector
+from ui.subscribe import launch_steam
 from ui.servers import ServersView
 from ui.favorites import ListView
 from ui.add_server import AddServerView
@@ -338,9 +339,15 @@ class DZSL(Adw.Application):
         elif view == "servers":
             ServersView(self.panel, self.cfg, self.favorites, self.connector.connect, self.toggle_fav, self.set_status, self.connector.load_mods).build()
         elif view == "mods":
-            ModsView(self.panel, self.cfg, self.set_status).build()
+            ModsView(self.panel, self.cfg, self.set_status, self.set_downloading).build()
         elif view == "settings":
-            SettingsView(self.panel, self.cfg, self.set_status, lambda: self.show_view("settings")).build()
+            SettingsView(
+                self.panel,
+                self.cfg,
+                self.set_status,
+                lambda: self.show_view("settings"),
+                self.set_downloading,
+            ).build()
 
     def _open_add_server_dialog(self):
         dlg = Adw.Dialog()

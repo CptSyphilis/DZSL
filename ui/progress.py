@@ -40,7 +40,7 @@ class ModProgressDialog:
 
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         root.add_css_class("dl-toast-body")
-        root.set_size_request(280, -1)
+        root.set_size_request(380, -1)
         root.set_margin_top(14)
         root.set_margin_bottom(12)
         root.set_margin_start(14)
@@ -96,7 +96,19 @@ class ModProgressDialog:
 
         btn_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
         btn_row.set_halign(Gtk.Align.END)
+        btn_row.set_spacing(6)
         btn_row.set_margin_top(2)
+
+        if self.on_open_downloads:
+            self.downloads_btn = Gtk.Button(label="Steam Downloads")
+            self.downloads_btn.add_css_class("btn-ghost")
+            self.downloads_btn.connect("clicked", lambda *_: self.on_open_downloads())
+            btn_row.append(self.downloads_btn)
+
+        self.next_btn = Gtk.Button(label="Continue")
+        self.next_btn.add_css_class("btn-ghost")
+        self.next_btn.connect("clicked", self._on_next_mod)
+        btn_row.append(self.next_btn)
 
         self.stop_btn = Gtk.Button(label="Stop")
         self.stop_btn.add_css_class("btn-danger")

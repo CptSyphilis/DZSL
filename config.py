@@ -188,13 +188,20 @@ def is_steam_running():
 
 DAYZ_APPID = "221100"
 
+def steam_library_root(path):
+    path = os.path.abspath(os.path.expanduser(path or ""))
+    if os.path.basename(path) == "steamapps":
+        return os.path.dirname(path)
+    return path
+
 def _steam_library_paths(steam_root):
     paths = set()
-    if steam_root and os.path.isdir(steam_root):
-        paths.add(steam_root)
+    root = steam_library_root(steam_root)
+    if root and os.path.isdir(root):
+        paths.add(root)
     for vdf in (
         os.path.expanduser("~/.local/share/Steam/steamapps/libraryfolders.vdf"),
-        os.path.join(steam_root or "", "steamapps", "libraryfolders.vdf"),
+        os.path.join(root or "", "steamapps", "libraryfolders.vdf"),
     ):
         if not os.path.isfile(vdf):
             continue
@@ -210,12 +217,13 @@ def _steam_library_paths(steam_root):
 
 def workshop_dir(cfg):
     if cfg.get("mods_dir"):
-        return cfg["mods_dir"]
-    return f"{cfg['steam_root']}/steamapps/workshop/content/{DAYZ_APPID}"
+        return os.path.abspath(os.path.expanduser(cfg["mods_dir"]))
+    root = steam_library_root(cfg.get("steam_root", ""))
+    return os.path.join(root, "steamapps", "workshop", "content", DAYZ_APPID)
 
 def workshop_dirs(cfg):
     if cfg.get("mods_dir"):
-        return [cfg["mods_dir"]]
+        return [os.path.abspath(os.path.expanduser(cfg["mods_dir"]))]
     dirs = []
     seen = set()
     for lib in _steam_library_paths(cfg.get("steam_root", "")):

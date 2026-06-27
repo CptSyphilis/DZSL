@@ -1,9 +1,10 @@
 import gi, shutil
 gi.require_version('Gtk', '4.0')
 from gi.repository import Gtk, GLib
-import requests, threading, subprocess, os, time
+import requests, threading, os
 from config import get_installed_mods, workshop_dirs
 from ui.helpers import clear_box, forward_steam_uri
+from ui.workshop_actions import WorkshopActionRunner
 
 TOOLS = [
     ("830640",      "DayZ Tools",           "Official Bohemia modding tools. Required for creating mods."),
@@ -17,10 +18,12 @@ TOOLS = [
 ]
 
 class ModsView:
-    def __init__(self, panel, cfg, set_status):
+    def __init__(self, panel, cfg, set_status, set_downloading=None):
         self.panel      = panel
         self.cfg        = cfg
         self.set_status = set_status
+        self.set_downloading = set_downloading or (lambda *_: None)
+        self.workshop = WorkshopActionRunner(cfg, set_status, self.set_downloading)
 
     def _steam_action(self, uri, status_msg):
         if forward_steam_uri(uri):
@@ -61,6 +64,15 @@ class ModsView:
     def _installed(self):
         tb = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8); tb.add_css_class("toolbar")
         se = Gtk.Entry(); se.set_placeholder_text("Search mods…"); se.add_css_class("search-box"); se.set_hexpand(True); tb.append(se)
+        install_id = Gtk.Entry()
+        install_id.set_placeholder_text("Workshop ID")
+        install_id.add_css_class("search-box")
+        install_id.set_width_chars(14)
+        tb.append(install_id)
+        ib = Gtk.Button(label="Install ID")
+        ib.add_css_class("toolbar-btn")
+        ib.connect("clicked", lambda _: self._install_workshop_id(install_id))
+        tb.append(ib)
         ub = Gtk.Button(label="Check Updates"); ub.add_css_class("toolbar-btn"); ub.add_css_class("accent"); tb.append(ub)
         self.content.append(tb)
 
@@ -85,7 +97,16 @@ class ModsView:
                 wb.connect("clicked", lambda _, mid=m["id"]: forward_steam_uri(f"steam://url/CommunityFilePage/{mid}"))
                 bb.append(wb)
                 upd = Gtk.Button(label="Update"); upd.add_css_class("btn-ghost")
-                upd.connect("clicked", lambda _, mid=m["id"], nm=m["name"]: self._steam_action(f"steam://installworkshop/221100/{mid}", f"Updating {nm}…"))
+                upd.connect(
+                    "clicked",
+                    lambda _, mid=m["id"], nm=m["name"]: self.workshop.install_mods(
+                        [mid],
+                        {mid: nm},
+                        label=f"Updating {nm}",
+                        repair=True,
+                        redownload=True,
+                    ),
+                )
                 bb.append(upd)
                 db = Gtk.Button(label="Unsubscribe"); db.add_css_class("btn-danger")
                 db.connect("clicked", lambda _, mid=m["id"], nm=m["name"], p=m["path"], btn=db: self._unsub_mod(mid, nm, btn, p, populate))
@@ -128,20 +149,29 @@ class ModsView:
                 elif not outdated:
                     GLib.idle_add(self.set_status, f"All {len(mods)} mods are up to date")
                 else:
-                    for mid in outdated:
-                        for wd in workshop_dirs(self.cfg):
-                            p = os.path.join(wd, mid)
-                            if os.path.isdir(p):
-                                shutil.rmtree(p, ignore_errors=True)
-                        forward_steam_uri(f"steam://installworkshop/221100/{mid}")
-                        time.sleep(0.3)
-                    GLib.idle_add(self.set_status, f"Updating {len(outdated)} outdated mod(s) via Steam")
+                    names = {m["id"]: m["name"] for m in mods}
+                    GLib.idle_add(
+                        self.workshop.install_mods,
+                        outdated,
+                        names,
+                        f"Updating {len(outdated)} outdated mod(s)",
+                        True,
+                        True,
+                    )
             threading.Thread(target=_check, daemon=True).start()
 
         populate()
         se.connect("changed", lambda e: populate(e.get_text()))
         ub.connect("clicked", check_updates)
         scroll.set_child(self.inst_box); self.content.append(scroll)
+
+    def _install_workshop_id(self, entry):
+        mid = entry.get_text().strip()
+        if not mid.isdigit():
+            self.set_status("Enter a numeric Steam Workshop ID.")
+            return
+        entry.set_text("")
+        self.workshop.install_mods([mid], {mid: mid}, label=f"Installing Workshop mod {mid}")
 
     def _tools(self):
         scroll = Gtk.ScrolledWindow(); scroll.set_vexpand(True)
@@ -155,7 +185,14 @@ class ModsView:
             row.append(inf)
             bb = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
             ib = Gtk.Button(label="Install"); ib.add_css_class("btn-connect")
-            ib.connect("clicked", lambda _, t=tid, nm=name: self._steam_action(f"steam://subscribe/{t}", f"Installing {nm}…"))
+            ib.connect(
+                "clicked",
+                lambda _, t=tid, nm=name: self.workshop.install_mods(
+                    [t],
+                    {t: nm},
+                    label=f"Installing {nm}",
+                ),
+            )
             wb = Gtk.Button(label="Workshop"); wb.add_css_class("btn-ghost")
             wb.connect("clicked", lambda _, t=tid: forward_steam_uri(f"steam://url/CommunityFilePage/{t}"))
             bb.append(ib); bb.append(wb); row.append(bb); box.append(row)
