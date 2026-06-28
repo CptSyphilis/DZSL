@@ -210,6 +210,22 @@ popover.dl-toast > contents {
                       padding: 7px 16px; font-size: 9px; font-weight: 800;
                       letter-spacing: 1.5px; font-family: monospace; }
 .mod-section-update { color: #d4b483; background: #151108; border-bottom-color: #3a2b13; }
+.creator-toolbar { padding: 10px 14px; background: #101213; }
+.creator-record { background: #101112; border-bottom: 1px solid #1b1d1e; }
+.creator-record:hover { background: #151719; }
+.creator-record.expanded { background: #131515; border-left: 3px solid #d4b483; }
+.creator-record-main { padding: 11px 16px; }
+.creator-monogram { min-width: 36px; min-height: 36px; border-radius: 18px;
+                    background: #21190c; border: 1px solid #594321; color: #d4b483;
+                    font-size: 14px; font-weight: 800; font-family: monospace; }
+.creator-name { color: #e0e2e3; font-size: 13px; font-weight: 650; }
+.creator-meta { color: #686d72; font-size: 10px; font-family: monospace; }
+.creator-chevron { color: #555b5e; font-size: 18px; min-width: 18px; }
+.creator-details { background: #0c0e0f; border-top: 1px solid #202223; padding: 14px 64px 18px; }
+.creator-mod-shelf { padding-top: 4px; }
+.creator-mod-chip { background: #151719; border: 1px solid #292c2e; border-radius: 3px;
+                    color: #9ba0a4; font-size: 10px; padding: 6px 10px; }
+.creator-mod-chip:hover { color: #d4b483; border-color: #594321; background: #21190c; }
 
 /* Empty state */
 .empty { color: #2a2a2a; font-size: 14px; font-style: italic; }

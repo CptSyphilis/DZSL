@@ -897,37 +897,213 @@ class ModsView:
         scroll.set_child(box); self.content.append(scroll)
 
     def _creators(self):
-        scroll = Gtk.ScrolledWindow(); scroll.set_vexpand(True)
+        overview = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=18)
+        overview.add_css_class("mods-overview")
+        heading = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        heading.set_hexpand(True)
+        title = Gtk.Label(label="CREATOR INDEX")
+        title.add_css_class("mods-overview-title")
+        title.set_halign(Gtk.Align.START)
+        heading.append(title)
+        subtitle = Gtk.Label(label="The people behind your installed Workshop loadout")
+        subtitle.add_css_class("mods-overview-subtitle")
+        subtitle.set_halign(Gtk.Align.START)
+        heading.append(subtitle)
+        overview.append(heading)
+
+        def metric(label):
+            wrapper = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
+            wrapper.add_css_class("mods-metric")
+            value = Gtk.Label(label="—")
+            value.add_css_class("mods-metric-value")
+            caption = Gtk.Label(label=label)
+            caption.add_css_class("mods-metric-label")
+            wrapper.append(value)
+            wrapper.append(caption)
+            overview.append(wrapper)
+            return value
+
+        creators_value = metric("CREATORS")
+        mods_value = metric("MODS")
+        self.content.append(overview)
+
+        toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        toolbar.add_css_class("toolbar")
+        toolbar.add_css_class("creator-toolbar")
+        search = Gtk.Entry()
+        search.set_placeholder_text("Search creators or their mods…")
+        search.add_css_class("search-box")
+        search.set_hexpand(True)
+        toolbar.append(search)
+        self.content.append(toolbar)
+
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_vexpand(True)
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        loading = Gtk.Label(label="Loading creator info…"); loading.add_css_class("empty"); loading.set_margin_top(60); box.append(loading)
-        scroll.set_child(box); self.content.append(scroll)
+        loading = Gtk.Label(label="Loading Steam creator profiles…")
+        loading.add_css_class("empty")
+        loading.set_margin_top(60)
+        box.append(loading)
+        scroll.set_child(box)
+        self.content.append(scroll)
+
+        records = []
+        active_expander = [None]
+
+        def render(query=""):
+            clear_box(box)
+            active_expander[0] = None
+            needle = query.strip().lower()
+            visible = [
+                record for record in records
+                if not needle
+                or needle in record["name"].lower()
+                or any(needle in mod["name"].lower() or needle in mod["id"] for mod in record["mods"])
+            ]
+            if not visible:
+                empty = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+                empty.add_css_class("mods-empty")
+                empty_title = Gtk.Label(label="No matching creators" if needle else "No creator information found")
+                empty_title.add_css_class("mods-empty-title")
+                empty_detail = Gtk.Label(label="Try a creator, mod name, or Workshop ID." if needle else "Steam did not return creator details for the installed mods.")
+                empty_detail.add_css_class("mods-empty-detail")
+                empty.append(empty_title)
+                empty.append(empty_detail)
+                box.append(empty)
+                return
+
+            for record in visible:
+                row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+                row.add_css_class("creator-record")
+                main = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+                main.add_css_class("creator-record-main")
+
+                monogram = Gtk.Label(label=(record["name"][:1] or "?").upper())
+                monogram.add_css_class("creator-monogram")
+                main.append(monogram)
+
+                info = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+                info.set_hexpand(True)
+                name = Gtk.Label(label=record["name"])
+                name.add_css_class("creator-name")
+                name.set_halign(Gtk.Align.START)
+                name.set_tooltip_text(f"Steam ID {record['id']}")
+                info.append(name)
+                mod_count = len(record["mods"])
+                meta = Gtk.Label(label=f"{mod_count} installed mod{'s' if mod_count != 1 else ''}")
+                meta.add_css_class("creator-meta")
+                meta.set_halign(Gtk.Align.START)
+                info.append(meta)
+                main.append(info)
+
+                profile = Gtk.Button(label="Steam profile")
+                profile.add_css_class("btn-steam")
+                profile.connect("clicked", lambda _button, cid=record["id"]: forward_steam_uri(f"steam://url/SteamIDPage/{cid}"))
+                main.append(profile)
+                chevron = Gtk.Label(label="›")
+                chevron.add_css_class("creator-chevron")
+                main.append(chevron)
+                row.append(main)
+
+                details = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+                details.add_css_class("creator-details")
+                details.set_visible(False)
+                detail_label = Gtk.Label(label="INSTALLED WORKSHOP MODS")
+                detail_label.add_css_class("mod-detail-key")
+                detail_label.set_halign(Gtk.Align.START)
+                details.append(detail_label)
+                shelf = Gtk.FlowBox()
+                shelf.add_css_class("creator-mod-shelf")
+                shelf.set_selection_mode(Gtk.SelectionMode.NONE)
+                shelf.set_min_children_per_line(1)
+                shelf.set_max_children_per_line(4)
+                for mod in record["mods"]:
+                    mod_button = Gtk.Button(label=mod["name"])
+                    mod_button.add_css_class("creator-mod-chip")
+                    mod_button.set_tooltip_text(f"Workshop {mod['id']}")
+                    mod_button.connect("clicked", lambda _button, mid=mod["id"]: forward_steam_uri(f"steam://url/CommunityFilePage/{mid}"))
+                    shelf.append(mod_button)
+                details.append(shelf)
+                row.append(details)
+
+                def set_expanded(expanded, target=row, panel=details, arrow=chevron):
+                    panel.set_visible(expanded)
+                    arrow.set_text("⌄" if expanded else "›")
+                    if expanded:
+                        target.add_css_class("expanded")
+                    else:
+                        target.remove_css_class("expanded")
+
+                def on_row_click(_gesture, n_press, x, y, panel=details, expand=set_expanded, container=row):
+                    if n_press != 1:
+                        return
+                    target = container.pick(x, y, Gtk.PickFlags.DEFAULT)
+                    while target is not None:
+                        if isinstance(target, Gtk.Button):
+                            return
+                        target = target.get_parent()
+                    opening = not panel.get_visible()
+                    if opening and active_expander[0] and active_expander[0] is not expand:
+                        active_expander[0](False)
+                    expand(opening)
+                    active_expander[0] = expand if opening else None
+
+                click = Gtk.GestureClick.new()
+                click.set_button(1)
+                click.connect("pressed", on_row_click)
+                row.add_controller(click)
+                box.append(row)
+
+        search.connect("changed", lambda entry: render(entry.get_text()))
 
         def fetch():
-            mods = get_installed_mods(self.cfg); creators = {}; profiles = {}
+            mods = get_installed_mods(self.cfg)
+            creators = {}
+            profiles = {}
+            error = None
             try:
-                ids = [m["id"] for m in mods]; pd = {"itemcount": len(ids)}
-                for i, mid in enumerate(ids): pd[f"publishedfileids[{i}]"] = mid
-                for d in requests.post("https://api.steampowered.com/ISteamRemoteStorage/GetPublishedFileDetails/v1/", data=pd, timeout=120).json().get("response", {}).get("publishedfiledetails", []):
-                    cid = d.get("creator", ""); mn = d.get("title", d.get("publishedfileid", ""))
-                    if cid: creators.setdefault(cid, []).append(mn)
+                ids = [mod["id"] for mod in mods]
+                payload = {"itemcount": len(ids)}
+                for index, mid in enumerate(ids):
+                    payload[f"publishedfileids[{index}]"] = mid
+                response = requests.post(
+                    "https://api.steampowered.com/ISteamRemoteStorage/GetPublishedFileDetails/v1/",
+                    data=payload,
+                    timeout=120,
+                )
+                response.raise_for_status()
+                details = response.json().get("response", {}).get("publishedfiledetails", [])
+                for detail in details:
+                    creator_id = str(detail.get("creator") or "")
+                    mod_id = str(detail.get("publishedfileid") or "")
+                    mod_name = detail.get("title") or mod_id
+                    if creator_id:
+                        creators.setdefault(creator_id, []).append({"id": mod_id, "name": mod_name})
                 profiles = self._fetch_creator_profiles(creators)
-            except: pass
+            except (requests.RequestException, ValueError) as exc:
+                error = str(exc)
 
             def show():
-                clear_box(box)
-                if not creators:
-                    el = Gtk.Label(label="No creator info found."); el.add_css_class("empty"); el.set_margin_top(60); box.append(el); return
-                for cid, mnames in creators.items():
-                    row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12); row.add_css_class("mod-row")
-                    inf = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2); inf.set_hexpand(True)
-                    profile = profiles.get(str(cid), {})
-                    cl = Gtk.Label(label=profile.get("personaname") or "Steam creator"); cl.add_css_class("mod-name"); cl.set_halign(Gtk.Align.START); inf.append(cl)
-                    summary = f"{len(mnames)} mod{'s' if len(mnames) != 1 else ''} · " + ", ".join(mnames[:4]) + ("…" if len(mnames) > 4 else "")
-                    ml = Gtk.Label(label=summary); ml.add_css_class("mod-id"); ml.set_halign(Gtk.Align.START); ml.set_ellipsize(3); inf.append(ml)
-                    row.append(inf)
-                    pb = Gtk.Button(label="Profile"); pb.add_css_class("btn-ghost")
-                    pb.connect("clicked", lambda _, c=cid: forward_steam_uri(f"steam://url/SteamIDPage/{c}"))
-                    row.append(pb); box.append(row)
+                if error:
+                    self.set_status(f"Could not load mod creators: {error}")
+                records.clear()
+                records.extend(sorted(
+                    (
+                        {
+                            "id": creator_id,
+                            "name": profiles.get(creator_id, {}).get("personaname") or "Steam creator",
+                            "mods": sorted(creator_mods, key=lambda mod: mod["name"].lower()),
+                        }
+                        for creator_id, creator_mods in creators.items()
+                    ),
+                    key=lambda record: record["name"].lower(),
+                ))
+                creators_value.set_text(str(len(records)))
+                mods_value.set_text(str(sum(len(record["mods"]) for record in records)))
+                render(search.get_text())
+                return False
+
             GLib.idle_add(show)
 
         threading.Thread(target=fetch, daemon=True).start()
