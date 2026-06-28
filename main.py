@@ -97,7 +97,7 @@ class DZSL(Adw.Application):
         ]:
             b = Gtk.Button(label=label)
             b.add_css_class("header-link")
-            b.connect("clicked", lambda _, k=key: self.show_view(k))
+            b.connect("clicked", lambda _, k=key: self._show_top_view(k))
             self.header_btns[key] = b
             nav_box.append(b)
 
@@ -316,6 +316,9 @@ class DZSL(Adw.Application):
     def clear_panel(self):
         clear_box(self.panel)
 
+    def _show_top_view(self, view):
+        self.show_view("welcome" if self.current_view == view else view)
+
     def show_view(self, view):
         if not getattr(self, "_steam_ready", False) and not is_steam_running():
             self._show_steam_wait_screen()
@@ -347,6 +350,7 @@ class DZSL(Adw.Application):
                 self.set_status,
                 lambda: self.show_view("settings"),
                 self.set_downloading,
+                lambda: self.show_view("favorites"),
             ).build()
 
     def _open_add_server_dialog(self):

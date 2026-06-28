@@ -17,7 +17,7 @@ Replaces the functionality of the Windows [DayZ Server App](https://dayzserverap
 - Auto-subscribe and download missing Workshop mods via Steam when joining
 - Built-in mod manager (installed mods, updates, unsubscribe)
 - Right-click server actions (join, load mods only, copy IP, properties)
-- Settings for Steam path, launcher, profile name, and launch options
+- Settings for Steam paths, profile name, and launch options
 - Native Linux UI (GTK 4 + Libadwaita)
 
 ## Requirements
@@ -25,7 +25,18 @@ Replaces the functionality of the Windows [DayZ Server App](https://dayzserverap
 - Linux (Ubuntu, Debian, Fedora, Arch, Pop!_OS, etc.)
 - Python 3.10+
 - Steam + DayZ installed
-- `gawk`, `curl`, `jq` (auto-installed by the installer on supported distros)
+- `gawk`, `curl`, `jq` for the optional standalone `bin/dayz-launcher.sh`
+
+## Workshop downloads
+
+DayZ Workshop mods are downloaded as directories containing `.pbo` payload files,
+not as a single archive. By default they are stored under:
+
+`<Steam library>/steamapps/workshop/content/221100/<Workshop ID>/`
+
+DZSL uses Steam's Workshop downloader in `auto` mode. The optional
+DepotDownloader backend must be selected explicitly; its output is staged and
+validated before it replaces an installed mod.
 
 ## Quick Install
 

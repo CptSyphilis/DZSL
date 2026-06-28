@@ -1,6 +1,7 @@
 import concurrent.futures
 import os
 import re
+import shutil
 import subprocess
 import threading
 import time
@@ -9,6 +10,7 @@ import requests
 from gi.repository import GLib
 
 from config import DAYZ_APPID, mod_installed, mod_subscribed, workshop_dir
+from steam_workshop import validate_mod_folder
 from ui.helpers import notify_check_steam
 from applog import get_logger
 
@@ -83,7 +85,10 @@ class ModDownloadManager:
         if not depot_bin or not username:
             return False, "DepotDownloader not available"
 
-        os.makedirs(dest_dir, exist_ok=True)
+        staging_dir = dest_dir + ".dzsl-partial"
+        self._recover_staged_mod(dest_dir)
+        self.cleanup_partial_mod(staging_dir, mid)
+        os.makedirs(staging_dir, exist_ok=True)
         max_chunks = int(self.cfg.get("download_max_chunks", 8))
         cmd = [
             depot_bin,
@@ -95,20 +100,18 @@ class ModDownloadManager:
             username,
             "-remember-password",
             "-dir",
-            dest_dir,
+            staging_dir,
             "-max-downloads",
             str(max(1, min(max_chunks, 8))),
         ]
         speed_kbps = int(self.cfg.get("download_speed_kbps", 0) or 0)
         if speed_kbps > 0:
-            import shutil as _shutil
-
-            if _shutil.which("trickle"):
+            if shutil.which("trickle"):
                 cmd = ["trickle", "-d", str(speed_kbps)] + cmd
             else:
                 log.warning("Speed limit set but trickle not found; downloading unlimited")
 
-        log.info("DepotDownloader: %s (%s) -> %s", mod_name, mid, dest_dir)
+        log.info("DepotDownloader: %s (%s) -> %s", mod_name, mid, staging_dir)
         try:
             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
             last_lines = []
@@ -144,17 +147,24 @@ class ModDownloadManager:
                 if progress and progress.is_cancelled():
                     proc.terminate()
                     proc.wait()
-                    self.cleanup_partial_mod(dest_dir, mid)
+                    self.cleanup_partial_mod(staging_dir, mid)
                     return False, "cancelled"
 
             proc.wait()
             if progress:
                 GLib.idle_add(progress.set_speed, "-")
             if proc.returncode == 0:
+                valid, reason = validate_mod_folder(staging_dir)
+                if not valid:
+                    self.cleanup_partial_mod(staging_dir, mid)
+                    error = f"Downloaded Workshop content failed validation: {reason}"
+                    log.error("DepotDownloader produced invalid mod %s: %s", mid, reason)
+                    return False, error
+                self._commit_staged_mod(staging_dir, dest_dir)
                 log.info("DepotDownloader done: %s (%s)", mod_name, mid)
                 return True, ""
 
-            self.cleanup_partial_mod(dest_dir, mid)
+            self.cleanup_partial_mod(staging_dir, mid)
             tail = "\n".join(last_lines[-3:]) if last_lines else ""
             err_msg = f"DepotDownloader exited {proc.returncode}"
             if tail:
@@ -163,16 +173,37 @@ class ModDownloadManager:
             return False, err_msg
         except Exception as exc:
             log.error("DepotDownloader error for %s: %s", mid, exc)
-            self.cleanup_partial_mod(dest_dir, mid)
+            self.cleanup_partial_mod(staging_dir, mid)
             return False, str(exc)
 
-    def cleanup_partial_mod(self, dest_dir, mid):
-        import shutil as _shutil
+    def _recover_staged_mod(self, dest_dir):
+        backup_dir = dest_dir + ".dzsl-backup"
+        if not os.path.exists(backup_dir):
+            return
+        if not os.path.exists(dest_dir):
+            os.replace(backup_dir, dest_dir)
+        else:
+            shutil.rmtree(backup_dir, ignore_errors=True)
 
+    def _commit_staged_mod(self, staging_dir, dest_dir):
+        backup_dir = dest_dir + ".dzsl-backup"
+        if os.path.exists(backup_dir):
+            shutil.rmtree(backup_dir, ignore_errors=True)
+        if os.path.exists(dest_dir):
+            os.replace(dest_dir, backup_dir)
+        try:
+            os.replace(staging_dir, dest_dir)
+        except Exception:
+            if os.path.exists(backup_dir) and not os.path.exists(dest_dir):
+                os.replace(backup_dir, dest_dir)
+            raise
+        shutil.rmtree(backup_dir, ignore_errors=True)
+
+    def cleanup_partial_mod(self, dest_dir, mid):
         if os.path.isdir(dest_dir):
             log.warning("Cleaning up partial download for %s: %s", mid, dest_dir)
             try:
-                _shutil.rmtree(dest_dir)
+                shutil.rmtree(dest_dir)
             except OSError as exc:
                 log.error("Failed to clean up %s: %s", dest_dir, exc)
 
@@ -193,7 +224,7 @@ class ModDownloadManager:
         pending = []
         done = 0
         for mid in ids:
-            if mod_installed(self.cfg, mid):
+            if mod_installed(self.cfg, mid) and mod_subscribed(self.cfg, mid):
                 log.info("Already installed: %s", names.get(mid, mid))
                 self.mark_mod_progress(progress, mid)
                 done += 1
@@ -207,12 +238,9 @@ class ModDownloadManager:
             return False, "cancelled"
 
         backend = "steam" if force_steam else self.cfg.get("download_backend", "auto")
-        if backend == "depot":
-            use_depot = True
-        elif backend == "steam":
-            use_depot = False
-        else:
-            use_depot = bool(self.depotdownloader_path() and self.get_steam_username())
+        # Steam is authoritative for Workshop manifests and updates. Keep the
+        # alternate downloader opt-in so auto mode cannot race Steam writes.
+        use_depot = backend == "depot"
         if not use_depot:
             notify_check_steam()
 
@@ -231,6 +259,8 @@ class ModDownloadManager:
             mod_name = names.get(mid, mid)
             log.info("Downloading: %s (%s)", mod_name, mid)
             self.set_status(f"Downloading {mod_name}...")
+            if progress:
+                progress.set_mod_status(mid, "Starting", "active")
 
             if use_depot:
                 dest = os.path.join(workshop_dir(self.cfg), mid)
@@ -253,6 +283,8 @@ class ModDownloadManager:
 
             if not ok:
                 log.error("Failed %s: %s", mod_name, err)
+                if progress:
+                    progress.set_mod_status(mid, "Failed", "failed")
                 with done_lock:
                     errors.append(err)
                 return

@@ -1,18 +1,20 @@
 import gi, shutil
 gi.require_version('Gtk', '4.0')
-from gi.repository import Gtk, GLib
-from config import DEFAULT_CFG, save_cfg
+gi.require_version('Adw', '1')
+from gi.repository import Adw, Gtk, GLib
+from config import DEFAULT_CFG, save_cfg, workshop_dir
 from ui.helpers import forward_steam_uri, unsubscribe_mod_ids
 from ui.workshop_actions import WorkshopActionRunner
 import threading
 
 class SettingsView:
-    def __init__(self, panel, cfg, set_status, reload_cb, set_downloading=None):
+    def __init__(self, panel, cfg, set_status, reload_cb, set_downloading=None, saved_cb=None):
         self.panel      = panel
         self.cfg        = cfg
         self.set_status = set_status
         self.reload_cb  = reload_cb
         self.set_downloading = set_downloading or (lambda *_: None)
+        self.saved_cb = saved_cb or (lambda: None)
         self.workshop = WorkshopActionRunner(cfg, set_status, self.set_downloading)
 
     def build(self):
@@ -98,7 +100,6 @@ class SettingsView:
         # ── PATHS ──
         paths = card("PATHS")
         field_row(paths, "Steam Library Root",                        "steam_root",    "/mnt/Storage1tb/SteamLibrary")
-        field_row(paths, "CLI Launcher Path",                         "launcher_path", "bin/dayz-launcher.sh")
         field_row(paths, "Custom Mods Folder (blank = auto-detect)", "mods_dir",      "")
 
         # ── LAUNCH OPTIONS ──
@@ -139,7 +140,7 @@ class SettingsView:
         blbl = Gtk.Label(label="Download backend")
         blbl.add_css_class("settings-field-label"); blbl.set_halign(Gtk.Align.START)
         bvbox.append(blbl)
-        bnote = Gtk.Label(label="auto = DepotDownloader if available, else Steam")
+        bnote = Gtk.Label(label="auto = Steam Workshop (recommended); depot = explicit alternate downloader")
         bnote.add_css_class("settings-note"); bnote.set_halign(Gtk.Align.START)
         bvbox.append(bnote)
         backend_row.append(bvbox)
@@ -151,6 +152,18 @@ class SettingsView:
         backend_dd.connect("notify::selected", lambda w, _: self.cfg.update({"download_backend": _backend_opts[w.get_selected()]}))
         backend_row.append(backend_dd)
         dl.append(backend_row)
+
+        storage_note = Gtk.Label(
+            label=(
+                "Download format: Workshop mod folder containing PBO payload files\n"
+                f"Download location: {workshop_dir(self.cfg)}"
+            )
+        )
+        storage_note.add_css_class("settings-note")
+        storage_note.set_halign(Gtk.Align.START)
+        storage_note.set_wrap(True)
+        storage_note.set_selectable(True)
+        dl.append(storage_note)
 
         def spin_row(body, label, key, lo, hi, step, note=None, sensitive=True):
             row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
@@ -185,31 +198,101 @@ class SettingsView:
         ws = card("WORKSHOP ACTIONS")
 
         vb = Gtk.Button(label="VERIFY / REPAIR WORKSHOP MODS")
-        vb.add_css_class("btn-ghost")
+        vb.add_css_class("btn-connect")
         vb.set_halign(Gtk.Align.START)
-        vb.connect("clicked", lambda b: self.workshop.verify_installed_mods())
+        vb.connect("clicked", self._confirm_verify_all)
         ws.append(vb)
 
         ub = Gtk.Button(label="UNSUBSCRIBE FROM ALL WORKSHOP MODS")
         ub.add_css_class("btn-danger")
         ub.set_halign(Gtk.Align.START)
-        ub.connect("clicked", lambda b: self._unsub_all())
+        ub.connect("clicked", self._confirm_unsubscribe_all)
         ws.append(ub)
 
         # ── SAVE / RESET ──
         btn_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         sb = Gtk.Button(label="Save Settings")
-        sb.add_css_class("btn-connect")
-        sb.connect("clicked", lambda b: [save_cfg(self.cfg), self.set_status("Settings saved.")])
+        sb.add_css_class("btn-success")
+        sb.connect("clicked", self._save_settings)
         btn_row.append(sb)
         rb = Gtk.Button(label="Reset to Defaults")
         rb.add_css_class("btn-ghost")
-        rb.connect("clicked", lambda b: [self.cfg.update(DEFAULT_CFG), save_cfg(self.cfg), self.reload_cb(), self.set_status("Settings reset.")])
+        rb.connect("clicked", self._confirm_reset)
         btn_row.append(rb)
         outer.append(btn_row)
 
         scroll.set_child(outer)
         self.panel.append(scroll)
+
+    def _save_settings(self, *_):
+        save_cfg(self.cfg)
+        self.set_status("Settings saved.")
+        self.saved_cb()
+
+    def _confirm(self, heading, body, action_label, callback, destructive=False):
+        dialog = Adw.MessageDialog(transient_for=self.panel.get_root())
+        dialog.set_heading(heading)
+        dialog.set_body(body)
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("confirm", action_label)
+        if destructive:
+            dialog.set_response_appearance("confirm", Adw.ResponseAppearance.DESTRUCTIVE)
+        else:
+            dialog.set_response_appearance("confirm", Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_default_response("cancel")
+        dialog.set_close_response("cancel")
+
+        def on_response(message, response):
+            message.destroy()
+            if response == "confirm":
+                callback()
+
+        dialog.connect("response", on_response)
+        dialog.present()
+
+    def _confirm_verify_all(self, *_):
+        from config import get_installed_mods
+
+        count = len(get_installed_mods(self.cfg))
+        if not count:
+            self.set_status("No Workshop mods found. Check Steam Library Root in Settings.")
+            return
+        self._confirm(
+            "Verify and repair all Workshop mods?",
+            f"This checks {count} installed mods and asks Steam to redownload any invalid content. It can take a long time.",
+            "Verify All",
+            self.workshop.verify_installed_mods,
+        )
+
+    def _confirm_unsubscribe_all(self, *_):
+        from config import get_installed_mods
+
+        count = len(get_installed_mods(self.cfg))
+        if not count:
+            self.set_status("No Workshop mods found. Check Steam Library Root in Settings.")
+            return
+        self._confirm(
+            "Remove all Workshop mods?",
+            f"This removes local files for all {count} installed mods. Servers will need to download them again.",
+            "Remove All",
+            self._unsub_all,
+            destructive=True,
+        )
+
+    def _confirm_reset(self, *_):
+        self._confirm(
+            "Reset all settings?",
+            "This replaces your current paths, launch options, and download settings with defaults.",
+            "Reset Settings",
+            self._reset_settings,
+            destructive=True,
+        )
+
+    def _reset_settings(self):
+        self.cfg.update(DEFAULT_CFG)
+        save_cfg(self.cfg)
+        self.reload_cb()
+        self.set_status("Settings reset.")
 
     def _browse(self, entry, key):
         dialog = Gtk.FileDialog()

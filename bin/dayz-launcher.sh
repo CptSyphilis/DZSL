@@ -233,6 +233,13 @@ resolve_steam() {
 query_server_api() {
   [[ -z "${SERVER}" ]] && return
 
+  # The GTK app supplies its already-resolved mod list. Querying again would
+  # append every ID a second time to DayZ's -mod argument.
+  if (( ${#INPUT[@]} > 0 )); then
+    msg "Using ${#INPUT[@]} mod ID(s) supplied on the command line"
+    return
+  fi
+
   local query
   local response
   msg "Querying API for server: ${SERVER%:*}:${PORT}"
@@ -296,7 +303,7 @@ run_steam() {
   if [[ "${STEAM}" == flatpak ]]; then
     ( set -x; flatpak run "${FLATPAK_PARAMS[@]}" "${FLATPAK_STEAM}" "${@}"; )
   else
-    ( set -x; steam "${@}"; )
+    ( set -x; "${STEAM}" "${@}"; )
   fi
 }
 

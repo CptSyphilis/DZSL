@@ -1,5 +1,7 @@
 import os, json, re, subprocess
 
+from steam_workshop import item_download_progress, item_ready, item_record, validate_mod_folder
+
 CONFIG_FILE = os.path.expanduser("~/.config/dzsl/config.json")
 FAVS_FILE   = os.path.expanduser("~/.config/dzsl/favorites.json")
 RECENT_FILE = os.path.expanduser("~/.config/dzsl/recent.json")
@@ -55,6 +57,12 @@ def detect_steam_root():
 def _detect_launcher():
     script_dir = os.path.dirname(os.path.abspath(__file__))
     return os.path.join(script_dir, "bin", "dayz-launcher.sh")
+
+def resolve_launcher_path(configured=""):
+    path = os.path.abspath(os.path.expanduser(configured or ""))
+    if os.path.isfile(path):
+        return path
+    return _detect_launcher()
 
 DEFAULT_CFG = {
     "steam_root":    detect_steam_root(),
@@ -250,20 +258,17 @@ def workshop_acf_paths(cfg):
 def subscribed_mods(cfg):
     ids = set()
     for path in workshop_acf_paths(cfg):
-        try:
-            text = open(path, errors="ignore").read()
-            idx = text.find("WorkshopItemsInstalled")
-            if idx < 0:
-                continue
-            chunk = text[idx:]
-            for match in re.finditer(r'"(\d{6,})"\s*\n\s*\{', chunk):
-                ids.add(match.group(1))
-        except OSError:
-            pass
+        from steam_workshop import read_manifest
+
+        details = read_manifest(path).get("WorkshopItemDetails", {})
+        ids.update(mid for mid, record in details.items() if record.get("subscribedby"))
     return ids
 
 def mod_subscribed(cfg, mod_id):
-    return str(mod_id) in subscribed_mods(cfg)
+    return item_record(workshop_acf_paths(cfg), mod_id)["subscribed"]
+
+def mod_download_progress(cfg, mod_id):
+    return item_download_progress(workshop_acf_paths(cfg), mod_id)
 
 WORKSHOP_LOG_CANDIDATES = [
     os.path.expanduser("~/.local/share/Steam/logs/workshop_log.txt"),
@@ -283,21 +288,15 @@ def mod_subscribed_per_steam_log(mod_id):
 
 def mod_installed(cfg, mod_id):
     mid = str(mod_id)
+    manifests = workshop_acf_paths(cfg)
+    if manifests:
+        record = item_record(manifests, mid)
+        if record.get("installed"):
+            return item_ready(manifests, workshop_dirs(cfg), mid)
     for wd in workshop_dirs(cfg):
         path = os.path.join(wd, mid)
-        if not os.path.isdir(path):
-            continue
-        meta = os.path.join(path, "meta.cpp")
-        if os.path.isfile(meta) and os.path.getsize(meta) > 0:
-            try:
-                if open(meta, "rb").read(4) != b"\x00\x00\x00\x00":
-                    return True
-            except OSError:
-                pass
-        elif not os.path.isfile(meta):
-            entries = [e for e in os.listdir(path) if not e.startswith(".")]
-            if entries:
-                return True
+        if validate_mod_folder(path)[0]:
+            return True
     return False
 
 def find_corrupt_mods(cfg):
@@ -309,18 +308,8 @@ def find_corrupt_mods(cfg):
             path = os.path.join(wd, mid)
             if not os.path.isdir(path) or not mid.isdigit():
                 continue
-            meta = os.path.join(path, "meta.cpp")
-            if os.path.isfile(meta):
-                try:
-                    data = open(meta, "rb").read(4)
-                    if data == b"\x00\x00\x00\x00" or len(data) == 0:
-                        corrupt.append(path)
-                except OSError:
-                    corrupt.append(path)
-            else:
-                entries = [e for e in os.listdir(path) if not e.startswith(".")]
-                if not entries:
-                    corrupt.append(path)
+            if not validate_mod_folder(path)[0]:
+                corrupt.append(path)
     return corrupt
 
 def _mod_name_from_path(path, mid):

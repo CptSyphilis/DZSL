@@ -5,14 +5,17 @@ gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import GLib, Adw, Gtk
 from config import (
-    mod_installed, save_json, RECENT_FILE, load_json, load_cfg, FAVS_FILE,
+    mod_installed, mod_subscribed, save_json, RECENT_FILE, load_json, load_cfg,
+    FAVS_FILE,
 )
+from dayz_runtime import ModSetupError, build_launch_command, setup_mod_links
 
 from ui.download import ModDownloadManager
 from ui.progress import ModProgressDialog
 from ui.subscribe import SteamSubscriptionManager, launch_steam
 from ui.helpers import filter_server_mods, server_key
 from applog import get_logger
+import workshop_gate
 
 log = get_logger("connect")
 
@@ -152,7 +155,14 @@ class Connector:
             log.info("Ignoring connect/load-mods click — already busy")
             self.set_status("Download in progress — wait for it to finish before connecting.")
             return
+        acquired, active = workshop_gate.try_begin(
+            "Downloading server mods" if launch else "Loading server mods"
+        )
+        if not acquired:
+            self.set_status(f"Wait for the current Workshop operation to finish: {active}")
+            return
         self._busy = True
+        self._workshop_gate_active = True
         self._download_scheduled = False
         ip = self._server_ip(server)
         port = self._game_port(server)
@@ -174,6 +184,12 @@ class Connector:
         finally:
             if not self._download_scheduled:
                 self._busy = False
+                self._finish_workshop_operation()
+
+    def _finish_workshop_operation(self):
+        if getattr(self, "_workshop_gate_active", False):
+            self._workshop_gate_active = False
+            workshop_gate.finish()
 
     def is_steam_running(self):
         return subprocess.run(["pgrep", "-x", "steam"], capture_output=True).returncode == 0
@@ -247,53 +263,41 @@ class Connector:
             params.extend(shlex.split(extra))
         return params
 
-    def _launcher_cmd(self, server, mod_ids=None, launch=True, password=None):
-        """Build argv for bin/dayz-launcher.sh (see --help in that script)."""
-        ip = self._server_ip(server)
-        port = self._game_port(server)
-        query_port = self._query_port(server)
-        lp = self.cfg.get("launcher_path") or ""
-        sr = self.cfg.get("steam_root") or ""
-        if not lp or not os.path.isfile(lp):
-            raise FileNotFoundError(f"Launcher not found: {lp}")
-        cmd = ["env", f"STEAM_ROOT={sr}"]
-        mods_dir = (self.cfg.get("mods_dir") or "").strip()
-        if mods_dir:
-            cmd.append(f"DZSL_MODS_DIR={mods_dir}")
-        cmd.append(lp)
-        if launch:
-            cmd.append("--launch")
-        cmd.extend(["-s", self._server_addr(ip, port)])
-        if query_port and int(query_port) != int(port):
-            cmd.extend(["-p", str(query_port)])
-        profile = (self.cfg.get("profile_name") or "").strip()
-        if profile:
-            cmd.extend(["-n", profile])
+    def _effective_mod_ids(self, mod_ids=None):
+        ids = []
         seen = set()
-        for mid in mod_ids or []:
-            mid = str(mid).strip()
+        for raw_id in mod_ids or []:
+            mid = str(raw_id).strip()
             if mid and mid not in seen:
                 seen.add(mid)
-                cmd.append(mid)
-        extra_mods = (self.cfg.get("extra_mods") or "").strip()
-        if extra_mods:
-            for mid in extra_mods.split(";"):
-                mid = mid.strip()
-                if mid and mid not in seen:
-                    seen.add(mid)
-                    cmd.append(mid)
-        if launch:
-            game_params = self._game_params(password)
-            if game_params:
-                cmd.append("--")
-                cmd.extend(game_params)
-        return cmd
+                ids.append(mid)
+        for raw_id in (self.cfg.get("extra_mods") or "").split(";"):
+            mid = raw_id.strip()
+            if mid and mid not in seen:
+                seen.add(mid)
+                ids.append(mid)
+        return ids
+
+    def _launcher_cmd(self, server, mod_links=None, password=None):
+        ip = self._server_ip(server)
+        port = self._game_port(server)
+        profile = (self.cfg.get("profile_name") or "").strip()
+        return build_launch_command(
+            self._server_addr(ip, port),
+            mod_links or [],
+            profile,
+            self._game_params(password),
+        )
 
     def _run_launcher(self, server, mod_ids=None, launch=True, password=None):
         try:
-            cmd = self._launcher_cmd(server, mod_ids=mod_ids, launch=launch, password=password)
-        except (OSError, FileNotFoundError) as exc:
-            return subprocess.CompletedProcess(cmd=[], returncode=1, stdout="", stderr=str(exc))
+            ids = self._effective_mod_ids(mod_ids)
+            mod_links = setup_mod_links(self.cfg, ids)
+            if not launch:
+                return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+            cmd = self._launcher_cmd(server, mod_links=mod_links, password=password)
+        except (ModSetupError, OSError, ValueError) as exc:
+            return subprocess.CompletedProcess(args=[], returncode=1, stdout="", stderr=str(exc))
         return subprocess.run(cmd, capture_output=True, text=True)
 
     def _launcher_error(self, result):
@@ -390,7 +394,10 @@ class Connector:
         server_mods, mod_names = self._resolve_mods(server)
 
         if server_mods:
-            missing = [m for m in server_mods if not mod_installed(self.cfg, m)]
+            missing = [
+                m for m in server_mods
+                if not mod_installed(self.cfg, m) or not mod_subscribed(self.cfg, m)
+            ]
             if missing:
                 self._refresh_cfg()
                 queue, sizes = self._prepare_mod_queue(missing, mod_names)
@@ -415,8 +422,6 @@ class Connector:
         if launch:
             if not self._ensure_steam_for_launch():
                 return
-            if server_mods:
-                self._sync_steam_subscriptions(server_mods)
             self.set_status(f"Launching DayZ — {name}…")
             launch_result = self._run_launcher(
                 server, mod_ids=server_mods, launch=True, password=password,
@@ -549,7 +554,6 @@ class Connector:
             if launch:
                 if not self._ensure_steam_for_launch():
                     return
-                self._sync_steam_subscriptions(mod_ids)
                 self.set_status(f"Launching DayZ — {name}…")
                 time.sleep(1)
                 if self._download_cancelled(progress):
@@ -571,6 +575,7 @@ class Connector:
                 self.set_status(f"Mods loaded for {name}")
         finally:
             self._busy = False
+            self._finish_workshop_operation()
             if progress:
                 progress.close()
 

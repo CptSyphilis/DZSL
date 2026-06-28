@@ -17,6 +17,7 @@ from ui.download import ModDownloadManager
 from ui.progress import ModProgressDialog
 from ui.subscribe import SteamSubscriptionManager, launch_steam
 from applog import get_logger
+import workshop_gate
 
 log = get_logger("workshop")
 
@@ -91,13 +92,21 @@ class WorkshopActionRunner:
         if not ids:
             self.set_status("No Workshop mods selected.")
             return
+        acquired, active = workshop_gate.try_begin(label)
+        if not acquired:
+            self.set_status(f"Wait for the current Workshop operation to finish: {active}")
+            return
 
         progress = self._open_progress(ids, names)
-        threading.Thread(
-            target=self._install_worker,
-            args=(ids, names, label, repair, redownload, progress),
-            daemon=True,
-        ).start()
+        try:
+            threading.Thread(
+                target=self._install_worker,
+                args=(ids, names, label, repair, redownload, progress),
+                daemon=True,
+            ).start()
+        except Exception:
+            workshop_gate.finish()
+            raise
 
     def verify_installed_mods(self):
         mods = get_installed_mods(self.cfg)
@@ -175,5 +184,6 @@ class WorkshopActionRunner:
             installed = sum(1 for mid in ids if mod_installed(self.cfg, mid))
             self.set_status(f"Workshop mods ready: {installed}/{len(ids)}")
         finally:
+            workshop_gate.finish()
             self.set_downloading(False)
             GLib.idle_add(progress.close)
