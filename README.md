@@ -34,9 +34,7 @@ not as a single archive. By default they are stored under:
 
 `<Steam library>/steamapps/workshop/content/221100/<Workshop ID>/`
 
-DZSL uses Steam's Workshop downloader in `auto` mode. The optional
-DepotDownloader backend must be selected explicitly; its output is staged and
-validated before it replaces an installed mod.
+DZSL uses Steam Workshop for subscriptions, downloads, updates, and progress.
 
 ## Quick Install
 

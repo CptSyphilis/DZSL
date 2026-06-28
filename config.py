@@ -80,10 +80,6 @@ DEFAULT_CFG = {
     "script_debug":  False,
     "skip_battleye": False,
     "close_on_launch": True,
-    "download_max_chunks": 1,
-    "download_speed_kbps": 0,
-    "download_backend": "steam",
-    "download_parallel": 1,
     "window_width":  1280,
     "window_height": 780,
     "window_maximized": True,
@@ -93,12 +89,17 @@ def load_cfg():
     if os.path.exists(CONFIG_FILE):
         try:
             d = json.load(open(CONFIG_FILE))
+            for key in ("download_backend", "download_max_chunks", "download_speed_kbps", "download_parallel"):
+                d.pop(key, None)
             return {**DEFAULT_CFG, **d}
         except: pass
     return dict(DEFAULT_CFG)
 
 def save_cfg(cfg):
-    json.dump(cfg, open(CONFIG_FILE, "w"), indent=2)
+    data = dict(cfg)
+    for key in ("download_backend", "download_max_chunks", "download_speed_kbps", "download_parallel"):
+        data.pop(key, None)
+    json.dump(data, open(CONFIG_FILE, "w"), indent=2)
 
 def load_json(path):
     if os.path.exists(path):

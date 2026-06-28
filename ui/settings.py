@@ -1,4 +1,4 @@
-import gi, shutil
+import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Adw, Gtk, GLib
@@ -133,29 +133,9 @@ class SettingsView:
         # ── DOWNLOAD ──
         dl = card("DOWNLOAD")
 
-        backend_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-        backend_row.set_valign(Gtk.Align.CENTER)
-        bvbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-        bvbox.set_hexpand(True)
-        blbl = Gtk.Label(label="Download backend")
-        blbl.add_css_class("settings-field-label"); blbl.set_halign(Gtk.Align.START)
-        bvbox.append(blbl)
-        bnote = Gtk.Label(label="auto = Steam Workshop (recommended); depot = explicit alternate downloader")
-        bnote.add_css_class("settings-note"); bnote.set_halign(Gtk.Align.START)
-        bvbox.append(bnote)
-        backend_row.append(bvbox)
-        _backend_opts = ["auto", "depot", "steam"]
-        backend_store = Gtk.StringList.new(_backend_opts)
-        backend_dd = Gtk.DropDown.new(backend_store, None)
-        cur = self.cfg.get("download_backend", "auto")
-        backend_dd.set_selected(_backend_opts.index(cur) if cur in _backend_opts else 0)
-        backend_dd.connect("notify::selected", lambda w, _: self.cfg.update({"download_backend": _backend_opts[w.get_selected()]}))
-        backend_row.append(backend_dd)
-        dl.append(backend_row)
-
         storage_note = Gtk.Label(
             label=(
-                "Download format: Workshop mod folder containing PBO payload files\n"
+                "Downloads and updates are managed by Steam Workshop\n"
                 f"Download location: {workshop_dir(self.cfg)}"
             )
         )
@@ -164,35 +144,6 @@ class SettingsView:
         storage_note.set_wrap(True)
         storage_note.set_selectable(True)
         dl.append(storage_note)
-
-        def spin_row(body, label, key, lo, hi, step, note=None, sensitive=True):
-            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-            row.set_valign(Gtk.Align.CENTER)
-            vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-            vbox.set_hexpand(True)
-            lbl = Gtk.Label(label=label)
-            lbl.add_css_class("settings-field-label")
-            lbl.set_halign(Gtk.Align.START)
-            vbox.append(lbl)
-            if note:
-                n = Gtk.Label(label=note)
-                n.add_css_class("settings-note")
-                n.set_halign(Gtk.Align.START)
-                vbox.append(n)
-            row.append(vbox)
-            spin = Gtk.SpinButton.new_with_range(lo, hi, step)
-            spin.set_value(self.cfg.get(key, lo))
-            spin.set_sensitive(sensitive)
-            spin.set_width_chars(6)
-            spin.connect("value-changed", lambda w, k=key: self.cfg.update({k: int(w.get_value())}))
-            row.append(spin)
-            body.append(row)
-
-        trickle_ok = bool(shutil.which("trickle"))
-        spin_row(dl, "Max concurrent chunks", "download_max_chunks", 1, 8, 1)
-        spin_row(dl, "Speed limit (KB/s)",    "download_speed_kbps", 0, 100000, 500,
-                 note=None if trickle_ok else "install trickle to enable",
-                 sensitive=trickle_ok)
 
         # ── WORKSHOP ACTIONS ──
         ws = card("WORKSHOP ACTIONS")

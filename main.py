@@ -1,6 +1,4 @@
-import atexit
 import os
-import signal
 import sys
 
 def _wayland_session():
@@ -43,26 +41,6 @@ from applog import setup_logging, get_logger
 setup_logging()
 log = get_logger("main")
 
-_app_instance = None
-
-def _kill_downloads():
-    try:
-        if _app_instance is not None:
-            _app_instance.connector.downloads.kill_all_active()
-    except Exception:
-        pass
-
-atexit.register(_kill_downloads)
-
-def _on_terminating_signal(signum, _frame):
-    log.info("Received signal %s — stopping active downloads", signum)
-    _kill_downloads()
-    sys.exit(0)
-
-signal.signal(signal.SIGTERM, _on_terminating_signal)
-signal.signal(signal.SIGINT, _on_terminating_signal)
-
-
 class DZSL(Adw.Application):
     def __init__(self):
         super().__init__(application_id="com.dzsl.app")
@@ -72,8 +50,6 @@ class DZSL(Adw.Application):
         self.current_view = "welcome"
 
     def on_activate(self, app):
-        global _app_instance
-        _app_instance = self
         self.win = Adw.ApplicationWindow(application=app)
         self.win.set_title("DZSL")
         w = self.cfg.get("window_width", 1280)

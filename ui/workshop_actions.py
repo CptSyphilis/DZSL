@@ -170,7 +170,6 @@ class WorkshopActionRunner:
                 names,
                 progress,
                 sizes,
-                force_steam=True,
             )
             self.set_downloading(False)
 
