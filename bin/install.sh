@@ -8,25 +8,52 @@ SOURCE_DIR="$(cd "$BIN_DIR/.." && pwd)"
 INSTALL_DIR="${DZSL_INSTALL_DIR:-$HOME/DZSL}"
 CONFIG_FILE="$HOME/.config/dzsl/config.json"
 
-echo "╔══════════════════════════════════╗"
-echo "║   DZSL - DayZ Server List        ║"
-echo "║   Linux Installer                ║"
-echo "╚══════════════════════════════════╝"
+# ── colours ──────────────────────────────────────────────────────────────────
+R='\033[0;31m'   # red
+Y='\033[0;33m'   # gold/amber
+W='\033[0;37m'   # dim white
+B='\033[1;37m'   # bright white
+D='\033[0m'      # reset
+
+_gold()  { echo -e "${Y}$*${D}"; }
+_white() { echo -e "${W}$*${D}"; }
+_bold()  { echo -e "${B}$*${D}"; }
+_red()   { echo -e "${R}$*${D}"; }
+_ok()    { echo -e "${Y}  ✓${W} $*${D}"; }
+_step()  { echo -e "${Y}  ›${W} $*${D}"; }
+_err()   { echo -e "${R}  ✗ $*${D}"; }
+
+clear
+
+echo -e "${Y}"
+cat << 'BANNER'
+  ██████╗ ███████╗███████╗██╗
+  ██╔══██╗╚════██║██╔════╝██║
+  ██║  ██║    ██╔╝███████╗██║
+  ██║  ██║   ██╔╝ ╚════██║██║
+  ██████╔╝   ██║  ███████║███████╗
+  ╚═════╝    ╚═╝  ╚══════╝╚══════╝
+BANNER
+echo -e "${W}  DayZ Server List for Linux${D}"
+echo -e "${Y}  ─────────────────────────────────────────${D}"
+echo -e "${W}  INSTALLER${D}"
 echo ""
 
+# ── detect distro ─────────────────────────────────────────────────────────────
 if [ -f /etc/os-release ]; then
     . /etc/os-release
     DISTRO="${ID:-unknown}"
 else
-    echo "Cannot detect distro. Install dependencies manually."
+    _err "Cannot detect distro. Install dependencies manually."
     exit 1
 fi
 
-echo "Detected: ${PRETTY_NAME:-$DISTRO}"
-echo "Source:   $SOURCE_DIR"
-echo "Install:  $INSTALL_DIR"
+_white "  System   : ${PRETTY_NAME:-$DISTRO}"
+_white "  Source   : $SOURCE_DIR"
+_white "  Target   : $INSTALL_DIR"
 echo ""
 
+# ── dependency helpers ────────────────────────────────────────────────────────
 python_deps_ok() {
     python3 - <<'PY' >/dev/null 2>&1
 import gi
@@ -44,54 +71,61 @@ launcher_deps_ok() {
 
 install_deps() {
     if python_deps_ok && launcher_deps_ok; then
-        echo "Dependencies already installed."
+        _ok "Dependencies already satisfied."
         return
     fi
 
     if ! command -v sudo >/dev/null; then
-        echo "sudo not found. Install manually: python3, python3-gi, gir1.2-gtk-4.0,"
-        echo "gir1.2-adw-1, python3-requests, python3-dotenv, gawk, curl, jq"
+        _err "sudo not found. Install manually:"
+        _white "  python3, python3-gi, gir1.2-gtk-4.0, gir1.2-adw-1,"
+        _white "  python3-requests, python3-dotenv, gawk, curl, jq"
         exit 1
     fi
 
+    echo ""
+    _gold "  [ DEPENDENCIES ]"
     case "$DISTRO" in
         ubuntu|debian|pop|linuxmint|elementary)
-            echo "Installing dependencies (apt)..."
-            sudo apt update
+            _step "Installing via apt..."
+            sudo apt update -qq
             sudo apt install -y python3 python3-gi python3-gi-cairo \
                 gir1.2-gtk-4.0 gir1.2-adw-1 python3-requests python3-dotenv \
                 gawk curl jq rsync
             ;;
         fedora|rhel|centos)
-            echo "Installing dependencies (dnf)..."
+            _step "Installing via dnf..."
             sudo dnf install -y python3 python3-gobject python3-requests \
                 python3-dotenv gtk4 libadwaita gawk curl jq rsync
             ;;
         arch|manjaro|endeavouros)
-            echo "Installing dependencies (pacman)..."
+            _step "Installing via pacman..."
             sudo pacman -Sy --noconfirm python python-gobject python-requests \
                 python-dotenv gtk4 libadwaita gawk curl jq rsync
             ;;
         opensuse*|sles)
-            echo "Installing dependencies (zypper)..."
+            _step "Installing via zypper..."
             sudo zypper install -y python3 python3-gobject python3-requests \
                 python3-dotenv typelib-1_0-Gtk-4_0 typelib-1_0-Adw-1 gawk curl jq rsync
             ;;
         *)
-            echo "Unknown distro: $DISTRO"
-            echo "Install manually: python3, python3-gi, gir1.2-gtk-4.0, gir1.2-adw-1,"
-            echo "python3-requests, python3-dotenv, gawk, curl, jq, rsync"
+            _err "Unknown distro: $DISTRO"
+            _white "  Install manually: python3, python3-gi, gir1.2-gtk-4.0, gir1.2-adw-1,"
+            _white "  python3-requests, python3-dotenv, gawk, curl, jq, rsync"
             ;;
     esac
 
     if ! python_deps_ok; then
-        echo "Error: Python/GTK dependencies still missing."
+        _err "Python/GTK dependencies still missing after install."
         exit 1
     fi
 }
 
+# ── steam detection ───────────────────────────────────────────────────────────
 detect_steam() {
-    echo "Detecting Steam library..."
+    echo ""
+    _gold "  [ STEAM ]"
+    _step "Scanning for Steam library..."
+
     STEAM_PATHS=(
         "$HOME/.local/share/Steam"
         "$HOME/.steam/steam"
@@ -114,7 +148,7 @@ detect_steam() {
     for p in "${STEAM_PATHS[@]}"; do
         [ -z "$p" ] && continue
         if [ -d "$p/steamapps/common/DayZ" ]; then
-            echo "Found DayZ at: $p"
+            _ok "Found DayZ at: $p"
             STEAM_ROOT="$p"
             return
         fi
@@ -123,18 +157,21 @@ detect_steam() {
     for p in "${STEAM_PATHS[@]}"; do
         [ -z "$p" ] && continue
         if [ -d "$p/steamapps" ]; then
-            echo "Found Steam library at: $p"
+            _ok "Found Steam library at: $p"
             STEAM_ROOT="$p"
             return
         fi
     done
 
-    echo "DayZ not found automatically. Set the path in Settings after launch."
+    _white "  DayZ not found automatically — set the path in Settings after launch."
     STEAM_ROOT="$HOME/.local/share/Steam"
 }
 
+# ── copy files ────────────────────────────────────────────────────────────────
 copy_app() {
-    echo "Installing DZSL to $INSTALL_DIR ..."
+    echo ""
+    _gold "  [ INSTALL ]"
+    _step "Copying files to $INSTALL_DIR ..."
     mkdir -p "$INSTALL_DIR"
 
     if command -v rsync >/dev/null; then
@@ -153,12 +190,13 @@ copy_app() {
     fi
 
     chmod +x "$INSTALL_DIR/bin/"*.sh 2>/dev/null || true
-    echo "Installed to $INSTALL_DIR"
+    _ok "Files installed."
 }
 
+# ── write config ──────────────────────────────────────────────────────────────
 write_config() {
     local launcher_path="$INSTALL_DIR/bin/dayz-launcher.sh"
-    echo "Writing config..."
+    _step "Writing config..."
     mkdir -p "$HOME/.config/dzsl"
 
     python3 - "$CONFIG_FILE" "$STEAM_ROOT" "$launcher_path" <<'PY'
@@ -191,11 +229,12 @@ merged = {**defaults, **existing, "steam_root": steam_root, "launcher_path": lau
 with open(path, "w") as f:
     json.dump(merged, f, indent=2)
 PY
-    echo "Config written to $CONFIG_FILE"
+    _ok "Config written."
 }
 
+# ── desktop entry ─────────────────────────────────────────────────────────────
 create_desktop_entry() {
-    echo "Creating desktop shortcut..."
+    _step "Creating desktop shortcut..."
     mkdir -p "$HOME/.local/share/applications"
     cat > "$HOME/.local/share/applications/dzsl.desktop" << DESKEOF
 [Desktop Entry]
@@ -209,9 +248,10 @@ Type=Application
 Categories=Game;
 StartupNotify=true
 DESKEOF
-    echo "Desktop shortcut created."
+    _ok "Desktop shortcut created."
 }
 
+# ── run ───────────────────────────────────────────────────────────────────────
 install_deps
 detect_steam
 copy_app
@@ -219,9 +259,13 @@ write_config
 create_desktop_entry
 
 echo ""
-echo "✓ DZSL installed successfully!"
+echo -e "${Y}  ═══════════════════════════════════════════${D}"
+echo -e "${Y}  DZSL installed successfully.${D}"
+echo -e "${Y}  ═══════════════════════════════════════════${D}"
 echo ""
-echo "Installed to: $INSTALL_DIR"
-echo "Run with:     $INSTALL_DIR/bin/dzsl.sh"
-echo "Or find DZSL in your application menu."
+_white "  Location : $INSTALL_DIR"
+_white "  Run with : $INSTALL_DIR/bin/dzsl.sh"
+_white "  Or find DZSL in your application menu."
+echo ""
+echo -e "${W}  Stay frosty, survivor.${D}"
 echo ""
