@@ -90,3 +90,16 @@ echo -e "${R}  ═════════════════════�
 echo ""
 echo -e "${W}  You didn't make it this time, survivor.${D}"
 echo ""
+
+read -p "$(echo -e "${Y}  Respawn? [y/N] ${D}")" respawn
+if [[ "$respawn" =~ ^[Yy]$ ]]; then
+    INSTALLER="$(cd "$(dirname "$0")" && pwd)/install.sh"
+    if [ -f "$INSTALLER" ]; then
+        echo ""
+        exec bash "$INSTALLER"
+    else
+        echo -e "${R}  ✗ Installer not found at $INSTALLER${D}"
+        exit 1
+    fi
+fi
+echo ""
