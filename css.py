@@ -19,6 +19,9 @@ window { background: #0d0d0d; }
 .header-link:hover { background: #0f1a22; color: #7aaccf; }
 .header-link.active { color: #d4b483; background: #1a1208; }
 .header-link-dl { color: #d4b483; font-weight: 700; }
+.header-back-btn { background: transparent; border: none; border-radius: 3px; color: #5a8aaa;
+                    padding: 4px 6px; margin: 0; min-height: 0; }
+.header-back-btn:hover { background: #0f1a22; color: #d4b483; }
 
 /* Welcome screen */
 .welcome-title { color: #d4b483; font-size: 48px; font-weight: 900; letter-spacing: 4px; font-family: monospace; }

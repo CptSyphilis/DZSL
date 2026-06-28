@@ -1,8 +1,12 @@
 import concurrent.futures
+import fcntl
 import os
+import pty
 import re
 import shutil
+import struct
 import subprocess
+import termios
 import threading
 import time
 
@@ -23,6 +27,35 @@ class ModDownloadManager:
         self.refresh_cfg = refresh_cfg
         self.set_status = set_status
         self.subscriptions = subscriptions
+        self._active_procs = set()
+        self._active_lock = threading.Lock()
+
+    def _register_proc(self, proc):
+        with self._active_lock:
+            self._active_procs.add(proc)
+
+    def _unregister_proc(self, proc):
+        with self._active_lock:
+            self._active_procs.discard(proc)
+
+    def kill_all_active(self):
+        with self._active_lock:
+            procs = list(self._active_procs)
+        for proc in procs:
+            try:
+                proc.terminate()
+            except OSError:
+                pass
+        for proc in procs:
+            try:
+                proc.wait(timeout=5)
+            except Exception:
+                try:
+                    proc.kill()
+                except OSError:
+                    pass
+        with self._active_lock:
+            self._active_procs.clear()
 
     @property
     def cfg(self):
@@ -113,12 +146,41 @@ class ModDownloadManager:
 
         log.info("DepotDownloader: %s (%s) -> %s", mod_name, mid, staging_dir)
         try:
-            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            master_fd, slave_fd = pty.openpty()
+            # DepotDownloader detects a 0×0 terminal size and throttles its live
+            # progress redraw; give it a real-looking size so updates keep flowing.
+            fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, struct.pack('HHHH', 50, 200, 0, 0))
+            proc = subprocess.Popen(cmd, stdout=slave_fd, stderr=slave_fd, close_fds=True)
+            os.close(slave_fd)
+            self._register_proc(proc)
             last_lines = []
             speed_window = []
             window_secs = 4.0
-            for line in proc.stdout:
-                line = line.strip()
+            ansi_re = re.compile(rb'\x1b\[[0-9;]*[a-zA-Z]')
+            buf = b""
+
+            def read_lines():
+                nonlocal buf
+                while True:
+                    try:
+                        chunk = os.read(master_fd, 4096)
+                    except OSError:
+                        break
+                    if not chunk:
+                        break
+                    buf += ansi_re.sub(b"", chunk)
+                    while True:
+                        idx_r = buf.find(b"\r")
+                        idx_n = buf.find(b"\n")
+                        if idx_r == -1 and idx_n == -1:
+                            break
+                        idx = min(i for i in (idx_r, idx_n) if i != -1)
+                        raw, buf = buf[:idx], buf[idx + 1:]
+                        yield raw.decode(errors="ignore").strip()
+                if buf.strip():
+                    yield buf.decode(errors="ignore").strip()
+
+            for line in read_lines():
                 if not line:
                     continue
                 log.debug("depot: %s", line)
@@ -147,10 +209,14 @@ class ModDownloadManager:
                 if progress and progress.is_cancelled():
                     proc.terminate()
                     proc.wait()
+                    os.close(master_fd)
+                    self._unregister_proc(proc)
                     self.cleanup_partial_mod(staging_dir, mid)
                     return False, "cancelled"
 
             proc.wait()
+            os.close(master_fd)
+            self._unregister_proc(proc)
             if progress:
                 GLib.idle_add(progress.set_speed, "-")
             if proc.returncode == 0:
@@ -173,6 +239,12 @@ class ModDownloadManager:
             return False, err_msg
         except Exception as exc:
             log.error("DepotDownloader error for %s: %s", mid, exc)
+            if 'proc' in locals():
+                self._unregister_proc(proc)
+            try:
+                os.close(master_fd)
+            except OSError:
+                pass
             self.cleanup_partial_mod(staging_dir, mid)
             return False, str(exc)
 

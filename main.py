@@ -1,4 +1,6 @@
+import atexit
 import os
+import signal
 import sys
 
 def _wayland_session():
@@ -40,6 +42,26 @@ from applog import setup_logging, get_logger
 setup_logging()
 log = get_logger("main")
 
+_app_instance = None
+
+def _kill_downloads():
+    try:
+        if _app_instance is not None:
+            _app_instance.connector.downloads.kill_all_active()
+    except Exception:
+        pass
+
+atexit.register(_kill_downloads)
+
+def _on_terminating_signal(signum, _frame):
+    log.info("Received signal %s — stopping active downloads", signum)
+    _kill_downloads()
+    sys.exit(0)
+
+signal.signal(signal.SIGTERM, _on_terminating_signal)
+signal.signal(signal.SIGINT, _on_terminating_signal)
+
+
 class DZSL(Adw.Application):
     def __init__(self):
         super().__init__(application_id="com.dzsl.app")
@@ -49,6 +71,8 @@ class DZSL(Adw.Application):
         self.current_view = "welcome"
 
     def on_activate(self, app):
+        global _app_instance
+        _app_instance = self
         self.win = Adw.ApplicationWindow(application=app)
         self.win.set_title("DZSL")
         w = self.cfg.get("window_width", 1280)
@@ -102,6 +126,14 @@ class DZSL(Adw.Application):
             nav_box.append(b)
 
         header_bar.pack_end(nav_box)
+
+        self.back_btn = Gtk.Button()
+        self.back_btn.set_icon_name("go-previous-symbolic")
+        self.back_btn.add_css_class("header-back-btn")
+        self.back_btn.set_tooltip_text("Back")
+        self.back_btn.connect("clicked", lambda _: self.show_view("welcome"))
+        self.back_btn.set_visible(False)
+        header_bar.pack_start(self.back_btn)
 
         root.append(header_bar)
 
@@ -325,6 +357,7 @@ class DZSL(Adw.Application):
             return
         log.info("View switched to %s", view)
         self.current_view = view
+        self.back_btn.set_visible(view != "welcome")
         self.clear_panel()
         for k, b in self.header_btns.items():
             if k == view:
@@ -364,6 +397,7 @@ class DZSL(Adw.Application):
         dlg.present(self.win)
 
     def _on_close_request(self, win):
+        _kill_downloads()
         maximized = win.is_maximized()
         self.cfg["window_maximized"] = maximized
         if not maximized:
