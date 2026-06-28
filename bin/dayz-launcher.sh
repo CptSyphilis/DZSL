@@ -1,3 +1,4 @@
+#!/bin/bash
 set -eo pipefail
 
 SELF=$(basename "$(readlink -f "${0}")")
@@ -104,6 +105,10 @@ Environment variables:
       /media/games/SteamLibrary/steamapps/common/DayZ
     then the STEAM_ROOT env var needs to be set like this:
       STEAM_ROOT=/media/games/SteamLibrary
+
+  DZSL_MODS_DIR
+    Optional absolute path to the DayZ Workshop content directory. Use this when
+    mods are stored outside STEAM_ROOT/steamapps/workshop/content/${DAYZ_ID}.
 EOF
 }
 
@@ -228,6 +233,13 @@ resolve_steam() {
 query_server_api() {
   [[ -z "${SERVER}" ]] && return
 
+  # The GTK app supplies its already-resolved mod list. Querying again would
+  # append every ID a second time to DayZ's -mod argument.
+  if (( ${#INPUT[@]} > 0 )); then
+    msg "Using ${#INPUT[@]} mod ID(s) supplied on the command line"
+    return
+  fi
+
   local query
   local response
   msg "Querying API for server: ${SERVER%:*}:${PORT}"
@@ -291,7 +303,7 @@ run_steam() {
   if [[ "${STEAM}" == flatpak ]]; then
     ( set -x; flatpak run "${FLATPAK_PARAMS[@]}" "${FLATPAK_STEAM}" "${@}"; )
   else
-    ( set -x; steam "${@}"; )
+    ( set -x; "${STEAM}" "${@}"; )
   fi
 }
 
@@ -313,10 +325,13 @@ main() {
       STEAM_ROOT="${XDG_DATA_HOME:-${HOME}/.local/share}/Steam"
     fi
   fi
-  STEAM_ROOT="${STEAM_ROOT}/steamapps"
+  local dir_steamapps="${STEAM_ROOT}"
+  if [[ "${dir_steamapps}" != */steamapps ]]; then
+    dir_steamapps="${dir_steamapps}/steamapps"
+  fi
 
-  local dir_dayz="${STEAM_ROOT}/common/DayZ"
-  local dir_workshop="${STEAM_ROOT}/workshop/content/${DAYZ_ID}"
+  local dir_dayz="${dir_steamapps}/common/DayZ"
+  local dir_workshop="${DZSL_MODS_DIR:-${dir_steamapps}/workshop/content/${DAYZ_ID}}"
   check_dir "${dir_dayz}"
   check_dir "${dir_workshop}"
 

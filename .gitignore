@@ -19,12 +19,19 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+pip-wheel-metadata/
 
 # Virtual environments
 venv/
 ENV/
 env/
 .venv/
+my_env/
 
 # IDE / Editor
 .idea/
@@ -45,10 +52,19 @@ CLAUDE.md
 .env
 files.zip
 readthis.txt
-.claude/
-assets/dzsl-bg.svg
-.gitignore
-assets/dzsl-bg.png
-assets/build_bg.py
 notes.txt
+.~lock.*
+
+# AI tooling
+.claude/
+.codex/
+.agents/
+
+# Assets not for distribution
+assets/dzsl-bg.png
+assets/dzsl-bg.svg
 assets/AGENTS.md
+assets/build_bg.py
+
+# Tests
+tests/

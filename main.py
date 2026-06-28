@@ -1,4 +1,6 @@
+import atexit
 import os
+import signal
 import sys
 
 def _wayland_session():
@@ -27,7 +29,8 @@ import threading, subprocess, time, os
 
 from config import load_cfg, save_cfg, save_json, load_json, FAVS_FILE, RECENT_FILE, is_steam_running, find_corrupt_mods
 from css import CSS
-from connect import Connector, launch_steam
+from connect import Connector
+from ui.subscribe import launch_steam
 from ui.servers import ServersView
 from ui.favorites import ListView
 from ui.add_server import AddServerView
@@ -39,6 +42,26 @@ from applog import setup_logging, get_logger
 setup_logging()
 log = get_logger("main")
 
+_app_instance = None
+
+def _kill_downloads():
+    try:
+        if _app_instance is not None:
+            _app_instance.connector.downloads.kill_all_active()
+    except Exception:
+        pass
+
+atexit.register(_kill_downloads)
+
+def _on_terminating_signal(signum, _frame):
+    log.info("Received signal %s — stopping active downloads", signum)
+    _kill_downloads()
+    sys.exit(0)
+
+signal.signal(signal.SIGTERM, _on_terminating_signal)
+signal.signal(signal.SIGINT, _on_terminating_signal)
+
+
 class DZSL(Adw.Application):
     def __init__(self):
         super().__init__(application_id="com.dzsl.app")
@@ -48,6 +71,8 @@ class DZSL(Adw.Application):
         self.current_view = "welcome"
 
     def on_activate(self, app):
+        global _app_instance
+        _app_instance = self
         self.win = Adw.ApplicationWindow(application=app)
         self.win.set_title("DZSL")
         w = self.cfg.get("window_width", 1280)
@@ -96,11 +121,19 @@ class DZSL(Adw.Application):
         ]:
             b = Gtk.Button(label=label)
             b.add_css_class("header-link")
-            b.connect("clicked", lambda _, k=key: self.show_view(k))
+            b.connect("clicked", lambda _, k=key: self._show_top_view(k))
             self.header_btns[key] = b
             nav_box.append(b)
 
         header_bar.pack_end(nav_box)
+
+        self.back_btn = Gtk.Button()
+        self.back_btn.set_icon_name("go-previous-symbolic")
+        self.back_btn.add_css_class("header-back-btn")
+        self.back_btn.set_tooltip_text("Back")
+        self.back_btn.connect("clicked", lambda _: self.show_view("welcome"))
+        self.back_btn.set_visible(False)
+        header_bar.pack_start(self.back_btn)
 
         root.append(header_bar)
 
@@ -315,12 +348,16 @@ class DZSL(Adw.Application):
     def clear_panel(self):
         clear_box(self.panel)
 
+    def _show_top_view(self, view):
+        self.show_view("welcome" if self.current_view == view else view)
+
     def show_view(self, view):
         if not getattr(self, "_steam_ready", False) and not is_steam_running():
             self._show_steam_wait_screen()
             return
         log.info("View switched to %s", view)
         self.current_view = view
+        self.back_btn.set_visible(view != "welcome")
         self.clear_panel()
         for k, b in self.header_btns.items():
             if k == view:
@@ -338,9 +375,16 @@ class DZSL(Adw.Application):
         elif view == "servers":
             ServersView(self.panel, self.cfg, self.favorites, self.connector.connect, self.toggle_fav, self.set_status, self.connector.load_mods).build()
         elif view == "mods":
-            ModsView(self.panel, self.cfg, self.set_status).build()
+            ModsView(self.panel, self.cfg, self.set_status, self.set_downloading).build()
         elif view == "settings":
-            SettingsView(self.panel, self.cfg, self.set_status, lambda: self.show_view("settings")).build()
+            SettingsView(
+                self.panel,
+                self.cfg,
+                self.set_status,
+                lambda: self.show_view("settings"),
+                self.set_downloading,
+                lambda: self.show_view("favorites"),
+            ).build()
 
     def _open_add_server_dialog(self):
         dlg = Adw.Dialog()
@@ -353,6 +397,7 @@ class DZSL(Adw.Application):
         dlg.present(self.win)
 
     def _on_close_request(self, win):
+        _kill_downloads()
         maximized = win.is_maximized()
         self.cfg["window_maximized"] = maximized
         if not maximized:

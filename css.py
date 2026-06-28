@@ -19,6 +19,9 @@ window { background: #0d0d0d; }
 .header-link:hover { background: #0f1a22; color: #7aaccf; }
 .header-link.active { color: #d4b483; background: #1a1208; }
 .header-link-dl { color: #d4b483; font-weight: 700; }
+.header-back-btn { background: transparent; border: none; border-radius: 3px; color: #5a8aaa;
+                    padding: 4px 6px; margin: 0; min-height: 0; }
+.header-back-btn:hover { background: #0f1a22; color: #d4b483; }
 
 /* Welcome screen */
 .welcome-title { color: #d4b483; font-size: 48px; font-weight: 900; letter-spacing: 4px; font-family: monospace; }
@@ -68,6 +71,9 @@ window { background: #0d0d0d; }
 .btn-connect { background: #8a1a1a; color: #fff; font-weight: 700; font-size: 12px;
                letter-spacing: 1px; border-radius: 2px; padding: 7px 18px; border: none; }
 .btn-connect:hover { background: #aa2020; }
+.btn-success { background: #245f36; color: #fff; font-weight: 700; font-size: 12px;
+               letter-spacing: 1px; border-radius: 2px; padding: 7px 18px; border: none; }
+.btn-success:hover { background: #2f7a47; }
 .btn-ghost { background: transparent; border: 1px solid #252525; border-radius: 2px;
              color: #555; font-size: 11px; padding: 5px 10px; }
 .btn-ghost:hover { border-color: #d4b483; color: #d4b483; }
@@ -115,6 +121,16 @@ popover.dl-toast > contents {
 .dl-toast-meta { color: #555; font-size: 10px; font-family: monospace; }
 .dl-toast-speed { color: #5a8aaa; font-size: 11px; font-weight: 700; font-family: monospace; }
 .dl-toast-hint { color: #3a3a3a; font-size: 10px; font-family: monospace; }
+.dl-toast-queue-title { color: #444; font-size: 9px; letter-spacing: 2px;
+                        font-family: monospace; font-weight: 700; }
+.dl-queue-row { padding: 4px 2px; border-bottom: 1px solid #161616; }
+.dl-queue-state { min-width: 12px; font-size: 10px; font-family: monospace; }
+.dl-queue-queued { color: #333; }
+.dl-queue-active { color: #5a8aaa; }
+.dl-queue-done { color: #4a8a4a; }
+.dl-queue-failed { color: #a44747; }
+.dl-queue-name { color: #777; font-size: 10px; font-family: monospace; }
+.dl-queue-status { color: #555; font-size: 10px; font-family: monospace; }
 
 /* Settings cards */
 .settings-card { background: #0f0f0f; border: 1px solid #1e1e1e; border-radius: 6px; }
@@ -137,6 +153,18 @@ popover.dl-toast > contents {
 .mod-name { color: #ccc; font-size: 12px; font-weight: 600; }
 .mod-id   { color: #333; font-size: 10px; font-family: monospace; }
 .mod-dl-pct { color: #5a8aaa; font-size: 10px; font-family: monospace; }
+.mod-record { padding: 0; }
+.mod-record.selected { background: #13171a; border-left: 3px solid #5a8aaa; }
+.mod-record-main { padding: 8px 16px; }
+.mod-status { font-size: 12px; font-family: monospace; }
+.mod-status-good { color: #4a8a4a; }
+.mod-status-warn { color: #b08a3e; }
+.mod-status-bad  { color: #a44747; }
+.mod-chevron { color: #444; font-size: 18px; min-width: 18px; }
+.mod-details { background: #0c0f11; border-top: 1px solid #1a2024; padding: 12px 44px 16px; }
+.mod-detail-key { color: #5a8aaa; font-size: 9px; letter-spacing: 1px;
+                  font-family: monospace; font-weight: 700; }
+.mod-detail-value { color: #777; font-size: 11px; font-family: monospace; }
 
 /* Empty state */
 .empty { color: #2a2a2a; font-size: 14px; font-style: italic; }

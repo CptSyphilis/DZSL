@@ -1,19 +1,21 @@
 import subprocess, threading, os, re, time, shlex
-import concurrent.futures
 import requests
 import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import GLib, Adw, Gtk
 from config import (
-    DAYZ_APPID, mod_installed, mod_subscribed, mod_subscribed_per_steam_log,
-    is_steam_running, save_json, RECENT_FILE, load_json, load_cfg, FAVS_FILE,
-    workshop_dir,
+    mod_installed, mod_subscribed, save_json, RECENT_FILE, load_json, load_cfg,
+    FAVS_FILE,
 )
+from dayz_runtime import ModSetupError, build_launch_command, setup_mod_links
 
+from ui.download import ModDownloadManager
 from ui.progress import ModProgressDialog
-from ui.helpers import filter_server_mods, forward_steam_uri, notify_check_steam, server_key
+from ui.subscribe import SteamSubscriptionManager, launch_steam
+from ui.helpers import filter_server_mods, server_key
 from applog import get_logger
+import workshop_gate
 
 log = get_logger("connect")
 
@@ -25,24 +27,6 @@ except ImportError:
 
 load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
-def launch_steam():
-    proc = subprocess.Popen(
-        ["steam"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
-        stdin=subprocess.DEVNULL,
-        start_new_session=True,
-        text=True,
-    )
-
-    def _log_stderr():
-        for line in proc.stderr:
-            line = line.strip()
-            if line:
-                log.warning("steam: %s", line)
-
-    threading.Thread(target=_log_stderr, daemon=True).start()
-
 class Connector:
     def __init__(self, cfg, win, set_status, set_downloading=None):
         self.cfg             = cfg
@@ -51,6 +35,20 @@ class Connector:
         self.set_downloading = set_downloading or (lambda *_: None)
         self._busy = False
         self._download_scheduled = False
+        self.subscriptions = SteamSubscriptionManager(
+            lambda: self.cfg,
+            self._refresh_cfg,
+            self.set_status,
+            self.is_steam_running,
+            self._wait_for_steam_start,
+            launch_steam,
+        )
+        self.downloads = ModDownloadManager(
+            lambda: self.cfg,
+            self._refresh_cfg,
+            self.set_status,
+            self.subscriptions,
+        )
 
     def _refresh_cfg(self):
         self.cfg = load_cfg()
@@ -157,7 +155,14 @@ class Connector:
             log.info("Ignoring connect/load-mods click — already busy")
             self.set_status("Download in progress — wait for it to finish before connecting.")
             return
+        acquired, active = workshop_gate.try_begin(
+            "Downloading server mods" if launch else "Loading server mods"
+        )
+        if not acquired:
+            self.set_status(f"Wait for the current Workshop operation to finish: {active}")
+            return
         self._busy = True
+        self._workshop_gate_active = True
         self._download_scheduled = False
         ip = self._server_ip(server)
         port = self._game_port(server)
@@ -179,6 +184,12 @@ class Connector:
         finally:
             if not self._download_scheduled:
                 self._busy = False
+                self._finish_workshop_operation()
+
+    def _finish_workshop_operation(self):
+        if getattr(self, "_workshop_gate_active", False):
+            self._workshop_gate_active = False
+            workshop_gate.finish()
 
     def is_steam_running(self):
         return subprocess.run(["pgrep", "-x", "steam"], capture_output=True).returncode == 0
@@ -252,49 +263,41 @@ class Connector:
             params.extend(shlex.split(extra))
         return params
 
-    def _launcher_cmd(self, server, mod_ids=None, launch=True, password=None):
-        """Build argv for bin/dayz-launcher.sh (see --help in that script)."""
-        ip = self._server_ip(server)
-        port = self._game_port(server)
-        query_port = self._query_port(server)
-        lp = self.cfg.get("launcher_path") or ""
-        sr = self.cfg.get("steam_root") or ""
-        if not lp or not os.path.isfile(lp):
-            raise FileNotFoundError(f"Launcher not found: {lp}")
-        cmd = ["env", f"STEAM_ROOT={sr}", lp]
-        if launch:
-            cmd.append("--launch")
-        cmd.extend(["-s", self._server_addr(ip, port)])
-        if query_port and int(query_port) != int(port):
-            cmd.extend(["-p", str(query_port)])
-        profile = (self.cfg.get("profile_name") or "").strip()
-        if profile:
-            cmd.extend(["-n", profile])
+    def _effective_mod_ids(self, mod_ids=None):
+        ids = []
         seen = set()
-        for mid in mod_ids or []:
-            mid = str(mid).strip()
+        for raw_id in mod_ids or []:
+            mid = str(raw_id).strip()
             if mid and mid not in seen:
                 seen.add(mid)
-                cmd.append(mid)
-        extra_mods = (self.cfg.get("extra_mods") or "").strip()
-        if extra_mods:
-            for mid in extra_mods.split(";"):
-                mid = mid.strip()
-                if mid and mid not in seen:
-                    seen.add(mid)
-                    cmd.append(mid)
-        if launch:
-            game_params = self._game_params(password)
-            if game_params:
-                cmd.append("--")
-                cmd.extend(game_params)
-        return cmd
+                ids.append(mid)
+        for raw_id in (self.cfg.get("extra_mods") or "").split(";"):
+            mid = raw_id.strip()
+            if mid and mid not in seen:
+                seen.add(mid)
+                ids.append(mid)
+        return ids
+
+    def _launcher_cmd(self, server, mod_links=None, password=None):
+        ip = self._server_ip(server)
+        port = self._game_port(server)
+        profile = (self.cfg.get("profile_name") or "").strip()
+        return build_launch_command(
+            self._server_addr(ip, port),
+            mod_links or [],
+            profile,
+            self._game_params(password),
+        )
 
     def _run_launcher(self, server, mod_ids=None, launch=True, password=None):
         try:
-            cmd = self._launcher_cmd(server, mod_ids=mod_ids, launch=launch, password=password)
-        except (OSError, FileNotFoundError) as exc:
-            return subprocess.CompletedProcess(cmd=[], returncode=1, stdout="", stderr=str(exc))
+            ids = self._effective_mod_ids(mod_ids)
+            mod_links = setup_mod_links(self.cfg, ids)
+            if not launch:
+                return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+            cmd = self._launcher_cmd(server, mod_links=mod_links, password=password)
+        except (ModSetupError, OSError, ValueError) as exc:
+            return subprocess.CompletedProcess(args=[], returncode=1, stdout="", stderr=str(exc))
         return subprocess.run(cmd, capture_output=True, text=True)
 
     def _launcher_error(self, result):
@@ -391,7 +394,10 @@ class Connector:
         server_mods, mod_names = self._resolve_mods(server)
 
         if server_mods:
-            missing = [m for m in server_mods if not mod_installed(self.cfg, m)]
+            missing = [
+                m for m in server_mods
+                if not mod_installed(self.cfg, m) or not mod_subscribed(self.cfg, m)
+            ]
             if missing:
                 self._refresh_cfg()
                 queue, sizes = self._prepare_mod_queue(missing, mod_names)
@@ -416,8 +422,6 @@ class Connector:
         if launch:
             if not self._ensure_steam_for_launch():
                 return
-            if server_mods:
-                self._sync_steam_subscriptions(server_mods)
             self.set_status(f"Launching DayZ — {name}…")
             launch_result = self._run_launcher(
                 server, mod_ids=server_mods, launch=True, password=password,
@@ -466,381 +470,22 @@ class Connector:
         d.present()
 
     def _download_cancelled(self, progress):
-        return progress and progress.is_cancelled()
+        return self.downloads.download_cancelled(progress)
 
     def _count_installed_mods(self, mod_ids):
-        return sum(1 for m in mod_ids if mod_installed(self.cfg, m))
+        return self.downloads.count_installed_mods(mod_ids)
 
     def _open_steam_downloads(self):
-        self._forward_steam_uri("steam://open/downloads")
+        self.subscriptions.open_steam_downloads()
 
-    def _forward_steam_uri(self, uri):
-        return forward_steam_uri(uri)
-
-    def _mod_download_timeout(self, nbytes):
-        nbytes = int(nbytes or 0)
-        if nbytes >= 5 * 1024 ** 3:
-            return 6 * 3600
-        if nbytes >= 1024 ** 3:
-            return 3 * 3600
-        if nbytes >= 100 * 1024 ** 2:
-            return 3600
-        return 900
-
-    def _depotdownloader_path(self):
-        candidates = [
-            os.path.expanduser("~/tools/depotdownloader/DepotDownloader"),
-            os.path.join(os.path.dirname(os.path.abspath(__file__)), "bin", "DepotDownloader"),
-        ]
-        for p in candidates:
-            if os.path.isfile(p) and os.access(p, os.X_OK):
-                return p
-        return None
-
-    def _get_steam_username(self):
-        vdf = os.path.expanduser("~/.local/share/Steam/config/loginusers.vdf")
-        try:
-            text = open(vdf, errors="ignore").read()
-            for m in re.finditer(r'"(\d{17})"[^{]*\{([^}]*)\}', text, re.DOTALL):
-                block = m.group(2)
-                if '"MostRecent"\t\t"1"' in block or '"MostRecent"  "1"' in block:
-                    nm = re.search(r'"AccountName"\s+"([^"]+)"', block)
-                    if nm:
-                        return nm.group(1)
-        except OSError:
-            pass
-        return None
-
-    def _download_mod_depotdownloader(self, mid, mod_name, dest_dir, progress=None, size_bytes=0):
-        depot_bin = self._depotdownloader_path()
-        username = self._get_steam_username()
-        if not depot_bin or not username:
-            return False, "DepotDownloader not available"
-
-        os.makedirs(dest_dir, exist_ok=True)
-        max_chunks = int(self.cfg.get("download_max_chunks", 8))
-        cmd = [depot_bin, "-app", DAYZ_APPID, "-pubfile", mid,
-               "-username", username, "-remember-password", "-dir", dest_dir,
-               "-max-downloads", str(max(1, min(max_chunks, 8)))]
-        speed_kbps = int(self.cfg.get("download_speed_kbps", 0) or 0)
-        if speed_kbps > 0:
-            import shutil as _shutil
-            if _shutil.which("trickle"):
-                cmd = ["trickle", "-d", str(speed_kbps)] + cmd
-            else:
-                log.warning("Speed limit set but trickle not found — downloading unlimited")
-        log.info("DepotDownloader: %s (%s) -> %s", mod_name, mid, dest_dir)
-        try:
-            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-            prev_pct = 0.0
-            last_lines = []
-            speed_window = []
-            WINDOW_SECS = 4.0
-            for line in proc.stdout:
-                line = line.strip()
-                if not line:
-                    continue
-                log.debug("depot: %s", line)
-                last_lines.append(line)
-                if len(last_lines) > 8:
-                    last_lines.pop(0)
-                m = re.match(r'\s*(\d+\.\d+)%', line)
-                if m:
-                    pct = float(m.group(1))
-                    now = time.time()
-                    bytes_done = pct / 100.0 * size_bytes if size_bytes else None
-                    if progress:
-                        GLib.idle_add(progress.set_mod_progress, mid, pct / 100.0, bytes_done, size_bytes)
-                    if size_bytes:
-                        speed_window.append((now, bytes_done))
-                        # drop samples older than WINDOW_SECS
-                        cutoff = now - WINDOW_SECS
-                        while len(speed_window) > 1 and speed_window[0][0] < cutoff:
-                            speed_window.pop(0)
-                        if len(speed_window) >= 2:
-                            dt = speed_window[-1][0] - speed_window[0][0]
-                            db = speed_window[-1][1] - speed_window[0][1]
-                            if dt >= 0.5 and db >= 0:
-                                bps = db / dt
-                                GLib.idle_add(progress.set_speed, self._format_size(bps) + "/s")
-                    prev_pct = pct
-
-                elif progress:
-                    GLib.idle_add(progress.set_hint, f"{mod_name}: {line}")
-                if progress and progress.is_cancelled():
-                    proc.terminate()
-                    proc.wait()
-                    self._cleanup_partial_mod(dest_dir, mid)
-                    return False, "cancelled"
-                
-            proc.wait()
-
-            if progress:
-                GLib.idle_add(progress.set_speed, "—")
-            if proc.returncode == 0:
-                log.info("DepotDownloader done: %s (%s)", mod_name, mid)
-                return True, ""
-            self._cleanup_partial_mod(dest_dir, mid)
-            tail = "\n".join(last_lines[-3:]) if last_lines else ""
-            err_msg = f"DepotDownloader exited {proc.returncode}"
-            if tail:
-                err_msg += f":\n{tail}"
-            log.error("DepotDownloader failed for %s: %s", mod_name, err_msg)
-            return False, err_msg
-        except Exception as exc:
-            log.error("DepotDownloader error for %s: %s", mid, exc)
-            self._cleanup_partial_mod(dest_dir, mid)
-            return False, str(exc)
-
-    def _cleanup_partial_mod(self, dest_dir, mid):
-        import shutil as _shutil
-        if os.path.isdir(dest_dir):
-            log.warning("Cleaning up partial download for %s: %s", mid, dest_dir)
-            try:
-                _shutil.rmtree(dest_dir)
-            except OSError as e:
-                log.error("Failed to clean up %s: %s", dest_dir, e)
-
-    def _subscribe_mod_steam(self, mod_id, mod_name):
-        self._forward_steam_uri(f"steam://installworkshop/221100/{str(mod_id)}")
-
-
-    def _open_workshop_page(self, mod_id, mod_name):
-        mid = str(mod_id)
-        log.warning("Auto-subscribe unresponsive for %s (%s) — opening Workshop page for manual subscribe", mod_name, mid)
-        self.set_status(f"Opened Steam Workshop page for {mod_name} — click Subscribe there to continue.")
-
-        import webbrowser
-        webbrowser.open(f"https://steamcommunity.com/sharedfiles/filedetails/?id={mid}")
-
-
-    
-    def _sync_steam_subscriptions(self, mod_ids, start_if_needed=True): 
-        if not mod_ids:
-            return
-        if start_if_needed and not self.is_steam_running():
-            self.set_status("Starting Steam to subscribe mods…")
-            launch_steam()
-            self._wait_for_steam_start(iterations=20, ready_sleep=2)
-        if not self.is_steam_running():
-            return
-        notify_check_steam()
-        for mid in mod_ids:
-            mid = str(mid)
-            self._subscribe_mod_steam(mid, mid)
+    def _sync_steam_subscriptions(self, mod_ids, start_if_needed=True):
+        self.subscriptions.sync_steam_subscriptions(mod_ids, start_if_needed)
 
     def _subscribe_and_wait_mods(self, mod_ids, mod_names=None, progress=None, sizes=None):
-        self._refresh_cfg()
-        names = mod_names or {}
-        total = len(mod_ids)
-        log.info("Need %d mod(s): %s", total, ", ".join(names.get(str(m), str(m)) for m in mod_ids))
-
-        pending = []
-        done = 0
-        for mid in mod_ids:
-            mid = str(mid)
-            if mod_installed(self.cfg, mid):
-                log.info("Already installed: %s", names.get(mid, mid))
-                self._mark_mod_progress(progress, mid)
-                done += 1
-            else:
-                pending.append(mid)
-        if progress:
-            progress.set_download_progress(done, total)
-        if not pending:
-            return True, ""
-        if progress and progress.is_cancelled():
-            return False, "cancelled"
-
-        backend = self.cfg.get("download_backend", "auto")
-        depot_bin = self._depotdownloader_path()
-        username = self._get_steam_username()
-        if backend == "depot":
-            use_depot = True
-        elif backend == "steam":
-            use_depot = False
-        else:  # auto
-            use_depot = bool(depot_bin and username)
-        if not use_depot:
-            notify_check_steam()
-
-        if use_depot:
-            n_parallel = 1
-        else:
-            n_parallel = max(1, int(self.cfg.get("download_parallel", 3)))
-        log.info("Downloading %d mod(s) with up to %d in parallel", len(pending), n_parallel)
-        if progress:
-            progress.set_action_prompt(f"Downloading {len(pending)} mod(s)…")
-
-        done_lock = threading.Lock()
-        errors = []
-
-        def download_one(mid):
-            if progress and progress.is_cancelled():
-                return
-            mod_name = names.get(mid, mid)
-            log.info("Downloading: %s (%s)", mod_name, mid)
-            self.set_status(f"Downloading {mod_name}…")
-
-            if use_depot:
-                dest = os.path.join(workshop_dir(self.cfg), mid)
-                ok, err = self._download_mod_depotdownloader(
-                    mid, mod_name, dest, progress, size_bytes=sizes.get(mid, 0) if sizes else 0
-                )
-            else:
-                self._subscribe_mod_steam(mid, mod_name)
-                ok = self._wait_for_mod_installed(mid, progress, mod_name, size_bytes=sizes.get(mid, 0) if sizes else 0
-                                                  )
-                
-                err = "" if ok else f"Timeout waiting for {mod_name}"
-
-            if not ok:
-                log.error("Failed %s: %s", mod_name, err)
-                with done_lock:
-                    errors.append(err)
-                return
-            self._mark_mod_progress(progress, mid)
-            with done_lock:
-                done_ref[0] += 1
-                current_done = done_ref[0]
-            if progress:
-                progress.set_download_progress(current_done, total)
-            log.info("Done: %s", mod_name)
-
-        done_ref = [done]
-        with concurrent.futures.ThreadPoolExecutor(max_workers=n_parallel) as ex:
-            futs = {ex.submit(download_one, mid): mid for mid in pending}
-            for fut in concurrent.futures.as_completed(futs):
-                try:
-                    fut.result()
-                except Exception as exc:
-                    mid = futs[fut]
-                    log.error("Unhandled error downloading %s: %s", mid, exc)
-                    with done_lock:
-                        errors.append(str(exc))
-
-        if errors:
-            return False, errors[0]
-        return True, ""
-
-    def _wait_for_mod_installed(self, mod_id, progress, mod_name, size_bytes=0):
-        mid = str(mod_id)
-        self.set_status(f"Waiting for {mod_name} download…")
-        start = time.time()
-        step = 2
-        steps = 3600 // step    # 1 hour
-        fallback_opened = False
-
-        for i in range(steps):
-            if progress and progress.is_cancelled():
-                log.info("Wait for %s cancelled after %ds", mod_name, int(time.time() - start))
-                return False
-            
-            self._refresh_cfg()
-            if mod_installed(self.cfg, mid):
-                log.info("%s installed after %ds", mod_name, int(time.time() - start))
-                return True
-            
-            subscribed = mod_subscribed(self.cfg, mid) or mod_subscribed_per_steam_log(mid)
-            if progress and progress.continue_requested():
-                if subscribed:
-                    log.info("User advanced past %s after %ds (subscription confirmed)", mod_name, int(time.time() - start))
-                    progress.clear_continue()
-                    return True
-                
-                log.warning("Next-mod click for %s ignored — not yet subscribed per Steam", mod_name)
-                progress.clear_continue()
-                progress.set_hint(f"Not subscribed yet in Steam — click Subscribe first for:\n{mod_name}")
-                elapsed = i * step
-                opened_fallback_now = False
-                if not fallback_opened and elapsed >= 10 and not subscribed:
-                    fallback_opened = True
-
-                opened_fallback_now = True
-                self._open_workshop_page(mid, mod_name)
-                notify_check_steam()
-                
-            elif elapsed and elapsed % 3600 == 0 and not subscribed:
-                log.warning("No progress on %s after %ds, resending subscribe URI", mod_name, elapsed)
-                self._subscribe_mod_steam(mid, mod_name)
-            if progress:
-                if opened_fallback_now:
-                    progress.set_action_prompt(f"Click Subscribe in Steam for:\n{mod_name}")
-                else:
-                    progress.set_action_prompt(f"Waiting for download: {mod_name}")
-            time.sleep(step)
-        ok = mod_installed(self.cfg, mid)
-        if not ok:
-            log.error("Timed out waiting for %s after %ds", mod_name, int(time.time() - start))
-        return ok
-
-    def _format_size(self, nbytes):
-        nbytes = int(nbytes or 0)
-        if nbytes < 1024:
-            return f"{nbytes} B"
-        if nbytes < 1024 ** 2:
-            return f"{nbytes / 1024:.1f} KB"
-        if nbytes < 1024 ** 3:
-            return f"{nbytes / 1024 ** 2:.1f} MB"
-        return f"{nbytes / 1024 ** 3:.2f} GB"
-
-    def _get_mod_size(self, mid):
-        total = 0
-        for wd in workshop_dir(self.cfg):
-            p = os.path.join(wd, str(mid))
-            if os.path.isdir(p):
-                for dirpath, _, filenames in os.walk(p):
-                    for f in filenames:
-                        try:
-                            total += os.path.getsize(os.path.join(dirpath, f))
-                        except OSError:
-                            pass
-                return total
-        return 0
-
-    def _fetch_mod_sizes(self, mod_ids):
-        sizes = {}
-        ids = [str(m) for m in mod_ids]
-        if not ids:
-            return sizes
-        try:
-            payload = {"itemcount": len(ids)}
-            for i, mid in enumerate(ids):
-                payload[f"publishedfileids[{i}]"] = mid
-            response = requests.post(
-                "https://api.steampowered.com/ISteamRemoteStorage/GetPublishedFileDetails/v1/",
-                data=payload,
-                timeout=120,
-            ).json()
-            for detail in response.get("response", {}).get("publishedfiledetails", []):
-                mid = str(detail.get("publishedfileid", ""))
-                if mid:
-                    sizes[mid] = int(detail.get("file_size", 0) or 0)
-        except Exception as exc:
-            log.warning("Could not fetch mod sizes: %s", exc)
-        return sizes
+        return self.downloads.subscribe_and_wait_mods(mod_ids, mod_names, progress, sizes)
 
     def _prepare_mod_queue(self, mod_ids, mod_names=None):
-        sizes = self._fetch_mod_sizes(mod_ids)
-        queue = sorted(mod_ids, key=lambda mid: sizes.get(str(mid), 0))
-        if queue:
-            order = ", ".join(
-                f"{(mod_names or {}).get(str(m), m)} ({self._format_size(sizes.get(str(m), 0))})"
-                for m in queue[:6]
-            )
-            log.info("Mod queue (smallest first): %s", order)
-        return queue, sizes
-
-    def _mark_mod_progress(self, progress, mod_id):
-        mid = str(mod_id)
-        if not progress:
-            return
-        
-        if mod_installed(self.cfg, mid):
-            progress.mark_installed(mid)
-
-        elif mod_subscribed(self.cfg, mid):
-            progress.mark_subscribed(mid)
+        return self.downloads.prepare_mod_queue(mod_ids, mod_names)
 
     def _dl_and_finish(self, mod_ids, sizes, server, mod_names, name, launch, password, progress):
         self._refresh_cfg()
@@ -852,9 +497,12 @@ class Connector:
                 progress.set_download_progress(0, total)
             self.set_status(f"Downloading {total} mods (smallest first)…")
 
-            ok, err = self._subscribe_and_wait_mods(self._subscribe_mod_steam(mid, mod_name)
-            ok = self._wait_for_mod_installed(
-                mid, progress, mod_name))
+            ok, err = self._subscribe_and_wait_mods(
+                mod_ids,
+                names,
+                progress,
+                sizes,
+            )
             self.set_downloading(False)
 
             if err == "cancelled" or self._download_cancelled(progress):
@@ -906,7 +554,6 @@ class Connector:
             if launch:
                 if not self._ensure_steam_for_launch():
                     return
-                self._sync_steam_subscriptions(mod_ids)
                 self.set_status(f"Launching DayZ — {name}…")
                 time.sleep(1)
                 if self._download_cancelled(progress):
@@ -928,6 +575,7 @@ class Connector:
                 self.set_status(f"Mods loaded for {name}")
         finally:
             self._busy = False
+            self._finish_workshop_operation()
             if progress:
                 progress.close()
 

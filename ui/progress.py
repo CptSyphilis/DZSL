@@ -20,7 +20,6 @@ class ModProgressDialog:
     def __init__(self, mod_ids, names, on_cancel=None,
                  on_open_downloads=None):
         self._cancel   = threading.Event()
-        self._continue = threading.Event()
         self._closed   = False
         self.on_cancel = on_cancel
         self.on_open_downloads = on_open_downloads
@@ -28,6 +27,8 @@ class ModProgressDialog:
         self.names     = names or {}
         self.total       = len(self.mod_ids)
         self.done_count  = 0
+        self._completed_ids = set()
+        self.mod_rows = {}
         self.current_mod_name  = ""
         self.current_fraction  = 0.0
         self.current_size_text = ""
@@ -36,11 +37,13 @@ class ModProgressDialog:
         self.popover.add_css_class("dl-toast")
         self.popover.set_position(Gtk.PositionType.TOP)
         self.popover.set_has_arrow(False)
-        self.popover.set_autohide(True)
+        # Screenshot tools temporarily move focus away from DZSL. Keep active
+        # download details visible until the user toggles them or work ends.
+        self.popover.set_autohide(False)
 
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         root.add_css_class("dl-toast-body")
-        root.set_size_request(280, -1)
+        root.set_size_request(430, -1)
         root.set_margin_top(14)
         root.set_margin_bottom(12)
         root.set_margin_start(14)
@@ -86,6 +89,41 @@ class ModProgressDialog:
         meta_row.append(self.speed_label)
         root.append(meta_row)
 
+        queue_sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+        queue_sep.add_css_class("dl-toast-sep")
+        root.append(queue_sep)
+
+        queue_title = Gtk.Label(label="MOD QUEUE")
+        queue_title.add_css_class("dl-toast-queue-title")
+        queue_title.set_halign(Gtk.Align.START)
+        root.append(queue_title)
+
+        queue_scroll = Gtk.ScrolledWindow()
+        queue_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        queue_scroll.set_max_content_height(210)
+        queue_scroll.set_propagate_natural_height(True)
+        queue_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        for mid in self.mod_ids:
+            item = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            item.add_css_class("dl-queue-row")
+            state = Gtk.Label(label="•")
+            state.add_css_class("dl-queue-state")
+            state.add_css_class("dl-queue-queued")
+            item.append(state)
+            name = Gtk.Label(label=self.names.get(mid, mid))
+            name.add_css_class("dl-queue-name")
+            name.set_halign(Gtk.Align.START)
+            name.set_hexpand(True)
+            name.set_ellipsize(3)
+            item.append(name)
+            status = Gtk.Label(label="Queued")
+            status.add_css_class("dl-queue-status")
+            item.append(status)
+            queue_box.append(item)
+            self.mod_rows[str(mid)] = (state, status)
+        queue_scroll.set_child(queue_box)
+        root.append(queue_scroll)
+
         self.hint = Gtk.Label(label="")
         self.hint.add_css_class("dl-toast-hint")
         self.hint.set_halign(Gtk.Align.START)
@@ -96,7 +134,14 @@ class ModProgressDialog:
 
         btn_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
         btn_row.set_halign(Gtk.Align.END)
+        btn_row.set_spacing(6)
         btn_row.set_margin_top(2)
+
+        if self.on_open_downloads:
+            self.downloads_btn = Gtk.Button(label="Steam Downloads")
+            self.downloads_btn.add_css_class("btn-ghost")
+            self.downloads_btn.connect("clicked", lambda *_: self.on_open_downloads())
+            btn_row.append(self.downloads_btn)
 
         self.stop_btn = Gtk.Button(label="Stop")
         self.stop_btn.add_css_class("btn-danger")
@@ -112,15 +157,6 @@ class ModProgressDialog:
 
     def is_cancelled(self):
         return self._cancel.is_set()
-
-    def clear_continue(self):
-        self._continue.clear()
-
-    def continue_requested(self):
-        return self._continue.is_set()
-
-    def _on_next_mod(self, *_):
-        self._continue.set()
 
     def set_action_prompt(self, text):
         self.set_phase(text, None)
@@ -194,6 +230,7 @@ class ModProgressDialog:
         self.set_phase(text, 0.95)
 
     def set_mod_progress(self, mid, fraction, bytes_done=None, total_bytes=None):
+        mid = str(mid)
         fraction = max(0.0, min(1.0, fraction))
         self.current_fraction = fraction
         self.current_mod_name = self.names.get(mid, mid)
@@ -208,16 +245,37 @@ class ModProgressDialog:
             self.pct_lbl.set_text(f"{int(fraction * 100)}%")
             self.bar.set_fraction(fraction)
             self.size_lbl.set_text(self.current_size_text)
+            self._update_queue_row(mid, f"{int(fraction * 100)}%", "active")
         self._run(update)
 
     def mark_subscribed(self, mid):
+        self.set_mod_status(mid, "Waiting for Steam", "active")
         self.set_hint(f"Subscribed: {self.names.get(mid, mid)}")
 
-    def mark_installed(self, _mid):
-        self.done_count += 1
+    def mark_installed(self, mid):
+        mid = str(mid)
+        if mid not in self._completed_ids:
+            self._completed_ids.add(mid)
+            self.done_count += 1
         def update():
             self.eyebrow.set_text(f"DOWNLOADING · {self.done_count}/{self.total}")
+            self._update_queue_row(mid, "Ready", "done")
         self._run(update)
+
+    def set_mod_status(self, mid, text, state="active"):
+        mid = str(mid)
+        self._run(lambda: self._update_queue_row(mid, text, state))
+
+    def _update_queue_row(self, mid, text, state):
+        row = self.mod_rows.get(str(mid))
+        if not row or self._closed:
+            return
+        indicator, status = row
+        for css_class in ("dl-queue-queued", "dl-queue-active", "dl-queue-done", "dl-queue-failed"):
+            indicator.remove_css_class(css_class)
+        indicator.add_css_class(f"dl-queue-{state}")
+        indicator.set_text("✓" if state == "done" else "!" if state == "failed" else "●" if state == "active" else "•")
+        status.set_text(text)
 
     def close(self):
         if self._closed:
