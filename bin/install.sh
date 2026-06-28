@@ -129,6 +129,7 @@ detect_steam() {
     STEAM_PATHS=(
         "$HOME/.local/share/Steam"
         "$HOME/.steam/steam"
+        "$HOME/.var/app/com.valvesoftware.Steam/.local/share/Steam"
         "/mnt/games/SteamLibrary"
         "/opt/steam"
         "$HOME/Steam"
@@ -136,7 +137,8 @@ detect_steam() {
 
     for vdf in \
         "$HOME/.local/share/Steam/steamapps/libraryfolders.vdf" \
-        "$HOME/.steam/steam/steamapps/libraryfolders.vdf"; do
+        "$HOME/.steam/steam/steamapps/libraryfolders.vdf" \
+        "$HOME/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/libraryfolders.vdf"; do
         if [ -f "$vdf" ]; then
             while IFS= read -r p; do
                 [ -n "$p" ] && STEAM_PATHS+=("$p")
@@ -184,7 +186,7 @@ copy_app() {
         rm -rf "$INSTALL_DIR"
         mkdir -p "$INSTALL_DIR"
         cp -a "$SOURCE_DIR/." "$INSTALL_DIR/"
-        rm -rf "$INSTALL_DIR/.git" "$INSTALL_DIR"/**/__pycache__ 2>/dev/null || true
+        rm -rf "$INSTALL_DIR/.git" 2>/dev/null || true
         find "$INSTALL_DIR" -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
         find "$INSTALL_DIR" -name '*.pyc' -delete 2>/dev/null || true
     fi

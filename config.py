@@ -13,6 +13,7 @@ def detect_steam_root():
     candidates = [
         os.path.expanduser("~/.local/share/Steam"),
         os.path.expanduser("~/.steam/steam"),
+        os.path.expanduser("~/.var/app/com.valvesoftware.Steam/.local/share/Steam"),
         "/mnt/games/SteamLibrary",
         "/opt/steam",
         os.path.expanduser("~/Steam"),
