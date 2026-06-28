@@ -22,8 +22,8 @@ if not os.environ.get("DISPLAY") and not os.environ.get("WAYLAND_DISPLAY"):
 import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
-from gi.repository import Gtk, Adw, GLib, Gdk
-import threading, subprocess, time, os
+from gi.repository import Gtk, Adw, GLib, Gdk, Gio
+import threading, subprocess, time, requests
 
 from config import load_cfg, save_cfg, save_json, load_json, FAVS_FILE, RECENT_FILE, is_steam_running, find_corrupt_mods, VERSION
 from css import CSS
@@ -37,19 +37,45 @@ from ui.settings import SettingsView
 from ui.welcome import WelcomeView
 from ui.helpers import clear_box
 from applog import setup_logging, get_logger
+from uri_handler import parse_connect_uri
 
 setup_logging()
 log = get_logger("main")
 
 class DZSL(Adw.Application):
     def __init__(self):
-        super().__init__(application_id="com.dzsl.app")
+        super().__init__(
+            application_id="com.dzsl.app",
+            flags=Gio.ApplicationFlags.HANDLES_COMMAND_LINE,
+        )
         self.connect("activate", self.on_activate)
+        self.connect("command-line", self.on_command_line)
         self.cfg = load_cfg()
         self.favorites = load_json(FAVS_FILE)
         self.current_view = "welcome"
+        self._pending_connect = None
+
+    def on_command_line(self, _app, command_line):
+        for raw_arg in command_line.get_arguments()[1:]:
+            arg = raw_arg.decode() if isinstance(raw_arg, bytes) else str(raw_arg)
+            if not arg.lower().startswith("dzsl:"):
+                continue
+            try:
+                self._pending_connect = parse_connect_uri(arg)
+            except ValueError as exc:
+                command_line.printerr(f"DZSL: {exc}\n")
+                return 2
+            break
+
+        self.activate()
+        return 0
 
     def on_activate(self, app):
+        if getattr(self, "win", None):
+            self.win.present()
+            self._dispatch_pending_connect()
+            return
+
         self.win = Adw.ApplicationWindow(application=app)
         self.win.set_title("DZSL")
         w = self.cfg.get("window_width", 1280)
@@ -225,6 +251,7 @@ class DZSL(Adw.Application):
             self._steam_ready = True
             self.set_status("Ready")
             self.show_view(self.current_view)
+            self._dispatch_pending_connect()
             GLib.timeout_add_seconds(5, self._poll_steam_status)
             threading.Thread(target=self._scan_corrupt_mods, daemon=True).start()
             return
@@ -244,6 +271,7 @@ class DZSL(Adw.Application):
             self.set_status("Ready")
             self._hide_steam_wait_screen()
             self.show_view(self.current_view)
+            self._dispatch_pending_connect()
             if getattr(self, "_recheck_source", None):
                 GLib.source_remove(self._recheck_source)
                 self._recheck_source = None
@@ -315,9 +343,64 @@ class DZSL(Adw.Application):
             self.set_status("Ready")
             self._hide_steam_wait_screen()
             self.show_view(self.current_view)
+            self._dispatch_pending_connect()
         else:
             self.set_status("Steam still not detected — launching...")
             launch_steam()
+
+    def _dispatch_pending_connect(self):
+        if not self._pending_connect or not getattr(self, "_steam_ready", False):
+            return
+        if getattr(self.connector, "_busy", False):
+            self.set_status("A connect operation is already running — link queued.")
+            GLib.timeout_add_seconds(2, self._retry_pending_connect)
+            return
+
+        host, port = self._pending_connect
+        self._pending_connect = None
+        self.set_status(f"Loading server {host}:{port} from website…")
+        threading.Thread(
+            target=self._resolve_linked_server,
+            args=(host, port),
+            daemon=True,
+        ).start()
+
+    def _retry_pending_connect(self):
+        self._dispatch_pending_connect()
+        return bool(self._pending_connect)
+
+    def _resolve_linked_server(self, host, port):
+        server = {
+            "ip": host,
+            "port": port,
+            "gamePort": port,
+            "name": f"{host}:{port}",
+            "mods": [],
+        }
+        try:
+            response = requests.get(
+                f"https://dayzsalauncher.com/api/v1/query/{host}/{port}",
+                headers={"User-Agent": "DZSL/1.0"},
+                timeout=12,
+            )
+            response.raise_for_status()
+            result = response.json().get("result", {})
+            if isinstance(result, dict):
+                server.update(result)
+        except (requests.RequestException, ValueError) as exc:
+            log.warning("Could not resolve website server link %s:%s: %s", host, port, exc)
+
+        server["ip"] = host
+        server.setdefault("port", port)
+        server.setdefault("gamePort", port)
+        server.setdefault("name", f"{host}:{port}")
+        server.setdefault("mods", [])
+        GLib.idle_add(self._connect_linked_server, server)
+
+    def _connect_linked_server(self, server):
+        self.win.present()
+        self.connector.connect(server)
+        return False
 
     def set_status(self, msg):
         GLib.idle_add(self.status_lbl.set_text, msg)

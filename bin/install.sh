@@ -242,14 +242,25 @@ create_desktop_entry() {
 [Desktop Entry]
 Name=DZSL
 Comment=DayZ Server List for Linux
-Exec=$INSTALL_DIR/bin/dzsl.sh
+Exec=$INSTALL_DIR/bin/dzsl.sh %u
 Icon=$INSTALL_DIR/assets/icon.png
 Path=$INSTALL_DIR
 Terminal=false
 Type=Application
 Categories=Game;
+MimeType=x-scheme-handler/dzsl;
 StartupNotify=true
 DESKEOF
+    if command -v update-desktop-database >/dev/null 2>&1; then
+        update-desktop-database "$HOME/.local/share/applications"
+    fi
+    if command -v xdg-mime >/dev/null 2>&1; then
+        xdg-mime default dzsl.desktop x-scheme-handler/dzsl
+    elif command -v gio >/dev/null 2>&1; then
+        gio mime x-scheme-handler/dzsl dzsl.desktop >/dev/null
+    else
+        _white "  Could not register dzsl:// links automatically."
+    fi
     _ok "Desktop shortcut created."
 }
 

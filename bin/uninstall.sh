@@ -64,6 +64,9 @@ _gold "  [ REMOVING ]"
 
 if [ -f "$DESKTOP" ]; then
     rm "$DESKTOP"
+    if command -v update-desktop-database >/dev/null 2>&1; then
+        update-desktop-database "$HOME/.local/share/applications"
+    fi
     _ok "Desktop shortcut removed."
 else
     _white "  No desktop shortcut found."
