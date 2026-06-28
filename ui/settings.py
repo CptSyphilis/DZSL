@@ -99,7 +99,7 @@ class SettingsView:
 
         # ── PATHS ──
         paths = card("PATHS")
-        field_row(paths, "Steam Library Root",                        "steam_root",    "/mnt/Storage1tb/SteamLibrary")
+        field_row(paths, "Steam Library Root",                        "steam_root",    "")
         field_row(paths, "Custom Mods Folder (blank = auto-detect)", "mods_dir",      "")
 
         # ── LAUNCH OPTIONS ──

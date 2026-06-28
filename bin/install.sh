@@ -95,7 +95,6 @@ detect_steam() {
     STEAM_PATHS=(
         "$HOME/.local/share/Steam"
         "$HOME/.steam/steam"
-        "/mnt/Storage1tb/SteamLibrary"
         "/mnt/games/SteamLibrary"
         "/opt/steam"
         "$HOME/Steam"
