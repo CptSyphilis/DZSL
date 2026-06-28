@@ -45,7 +45,7 @@ CLAUDE.md
 .env
 files.zip
 readthis.txt
-.claude/settings.local.json
+.claude/
 assets/dzsl-bg.svg
 .gitignore
 assets/dzsl-bg.png
