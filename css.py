@@ -159,23 +159,57 @@ popover.dl-toast > contents {
 .settings-input:focus { border-color: #5a8aaa; }
 
 /* Mods */
-.mod-row { background: #111; border-bottom: 1px solid #161616; padding: 8px 16px; }
-.mod-row:hover { background: #161616; }
-.mod-name { color: #ccc; font-size: 12px; font-weight: 600; }
-.mod-id   { color: #333; font-size: 10px; font-family: monospace; }
+.mods-overview { background: #0d0f10; border-bottom: 1px solid #24211a; padding: 14px 18px; }
+.mods-overview-title { color: #d4b483; font-size: 12px; font-weight: 800; letter-spacing: 2px;
+                       font-family: monospace; }
+.mods-overview-subtitle { color: #686d72; font-size: 11px; }
+.mods-metric { min-width: 74px; padding: 2px 12px; border-left: 1px solid #292a2b; }
+.mods-metric-value { color: #d7d9da; font-size: 17px; font-weight: 700; font-family: monospace; }
+.mods-metric-label { color: #62676b; font-size: 8px; font-weight: 700; letter-spacing: 1px;
+                     font-family: monospace; }
+.mods-metric-attention { color: #b85b5b; }
+.mods-metric-update { color: #d4b483; }
+.mods-toolbar { padding: 10px 14px; background: #101213; }
+.mod-row { background: #101112; border-bottom: 1px solid #1b1d1e; padding: 9px 16px; }
+.mod-row:hover { background: #151719; }
+.mod-name { color: #e0e2e3; font-size: 13px; font-weight: 650; }
+.mod-id   { color: #686d72; font-size: 10px; font-family: monospace; }
 .mod-dl-pct { color: #5a8aaa; font-size: 10px; font-family: monospace; }
 .mod-record { padding: 0; }
-.mod-record.selected { background: #13171a; border-left: 3px solid #5a8aaa; }
-.mod-record-main { padding: 8px 16px; }
+.mod-record.selected { background: #131515; border-left: 3px solid #d4b483; }
+.mod-record.marked { background: #17140e; box-shadow: inset 3px 0 #d4b483; }
+.mod-record-main { padding: 10px 16px; }
 .mod-status { font-size: 12px; font-family: monospace; }
-.mod-status-good { color: #4a8a4a; }
-.mod-status-warn { color: #b08a3e; }
-.mod-status-bad  { color: #a44747; }
+.mod-status-good { color: #62a66b; }
+.mod-status-warn { color: #c39a4b; }
+.mod-status-bad  { color: #b85b5b; }
+.mod-status-update { color: #d4b483; border-color: #574322; background: #21190c; }
+.mod-state-pill { border-radius: 10px; padding: 3px 8px; margin: 0 6px;
+                  background: #17191a; border: 1px solid #292c2e;
+                  font-size: 8px; font-weight: 800; letter-spacing: 1px; font-family: monospace; }
+.mod-action-menu { background: transparent; border: 1px solid transparent; color: #74797d;
+                   border-radius: 3px; padding: 3px; min-width: 28px; min-height: 28px; }
+.mod-action-menu:hover { background: #1c1f20; border-color: #303335; color: #d4b483; }
+.mod-select-check { margin-right: 2px; }
+.mod-selection-bar { background: #17130c; border-top: 1px solid #3a2b13;
+                     border-bottom: 1px solid #3a2b13; padding: 8px 14px; }
+.mod-selection-count { color: #d4b483; font-size: 11px; font-weight: 700;
+                       letter-spacing: 1px; font-family: monospace; }
 .mod-chevron { color: #444; font-size: 18px; min-width: 18px; }
-.mod-details { background: #0c0f11; border-top: 1px solid #1a2024; padding: 12px 44px 16px; }
-.mod-detail-key { color: #5a8aaa; font-size: 9px; letter-spacing: 1px;
+.mod-details { background: #0c0e0f; border-top: 1px solid #202223; padding: 16px 46px 18px; }
+.mod-details-grid { padding-bottom: 4px; }
+.mod-detail-cell { min-height: 42px; }
+.mod-dependencies { border-top: 1px solid #1d2021; padding-top: 10px; }
+.mod-detail-key { color: #b89b6d; font-size: 9px; letter-spacing: 1px;
                   font-family: monospace; font-weight: 700; }
-.mod-detail-value { color: #777; font-size: 11px; font-family: monospace; }
+.mod-detail-value { color: #8a8f93; font-size: 11px; font-family: monospace; }
+.mods-empty { padding: 72px 24px; }
+.mods-empty-title { color: #8a8f93; font-size: 16px; font-weight: 650; }
+.mods-empty-detail { color: #505458; font-size: 11px; }
+.mod-section-header { color: #6f7478; background: #0b0d0e; border-bottom: 1px solid #202223;
+                      padding: 7px 16px; font-size: 9px; font-weight: 800;
+                      letter-spacing: 1.5px; font-family: monospace; }
+.mod-section-update { color: #d4b483; background: #151108; border-bottom-color: #3a2b13; }
 
 /* Empty state */
 .empty { color: #2a2a2a; font-size: 14px; font-style: italic; }
