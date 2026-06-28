@@ -24,25 +24,14 @@ window { background: #0d0d0d; }
 .header-back-btn:hover { background: #0f1a22; color: #d4b483; }
 
 /* Welcome screen */
-.welcome-scrim {
-    background: linear-gradient(to bottom,
-        rgba(8,10,12,0.30) 0%,
-        rgba(8,10,12,0.45) 45%,
-        rgba(8,10,12,0.82) 100%);
-}
-.welcome-bg-fallback { background: #0b0e10; }
-.welcome-title { color: #e6c78f; font-size: 72px; font-weight: 900; letter-spacing: 8px;
-                 font-family: monospace; text-shadow: 0 2px 12px rgba(0,0,0,0.9); }
-.welcome-sub { color: #9fb0bd; font-size: 14px; letter-spacing: 3px; font-family: monospace;
-               text-shadow: 0 1px 6px rgba(0,0,0,0.9); }
-.welcome-primary { background: rgba(30,20,9,0.85); border: 1px solid #d4b483; border-radius: 4px;
-                   color: #f0d9a8; font-size: 14px; font-weight: 700; padding: 12px 48px; letter-spacing: 2px;
-                   box-shadow: 0 4px 16px rgba(0,0,0,0.6); }
-.welcome-primary:hover { background: rgba(42,30,13,0.95); color: #fff; }
-.welcome-secondary { background: rgba(20,20,20,0.75); border: 1px solid #3a3a3a; border-radius: 4px;
-                     color: #c7d5e0; font-size: 12px; padding: 8px 24px;
-                     box-shadow: 0 2px 10px rgba(0,0,0,0.5); }
-.welcome-secondary:hover { background: rgba(28,28,28,0.9); color: #fff; border-color: #5a8aaa; }
+.welcome-title { color: #d4b483; font-size: 48px; font-weight: 900; letter-spacing: 4px; font-family: monospace; }
+.welcome-sub { color: #444; font-size: 13px; letter-spacing: 2px; font-family: monospace; }
+.welcome-primary { background: #1e1409; border: 1px solid #d4b483; border-radius: 4px;
+                   color: #d4b483; font-size: 14px; font-weight: 700; padding: 12px 48px; letter-spacing: 2px; }
+.welcome-primary:hover { background: #2a1e0d; }
+.welcome-secondary { background: #161616; border: 1px solid #252525; border-radius: 4px;
+                     color: #666; font-size: 12px; padding: 8px 24px; }
+.welcome-secondary:hover { background: #1c1c1c; color: #aaa; border-color: #333; }
 
 /* Toolbar */
 .toolbar { background: #111; border-bottom: 1px solid #1c1c1c; padding: 6px 12px; }

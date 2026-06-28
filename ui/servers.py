@@ -130,6 +130,7 @@ class ServersView:
 
         self.chk = {}
         for key, lbl in [
+            ("favonly", "Show favourites only"),
             ("noplayed", "Not played on"),
             ("nopass", "Not password protected"),
             ("nomodded", "Not modded only"),
@@ -567,6 +568,8 @@ class ServersView:
             if vi > 0 and vi < len(versions):
                 if not s.get("version", "").startswith(versions[vi]):
                     continue
+            if self.chk["favonly"].get_active() and not is_fav:
+                continue
             if self.chk["noplayed"].get_active() and key in played_ips:
                 continue
             if self.chk["nopass"].get_active() and pw:
@@ -601,20 +604,6 @@ class ServersView:
             return 0
 
         out.sort(key=sort_val, reverse=self.sort_rev)
-
-        # When no filters narrow the list, float favourites to the top
-        # (stable sort preserves the chosen sort order within each group).
-        no_filters_active = (
-            not q and not iq and mi == 0 and vi == 0
-            and not any(cb.get_active() for cb in self.chk.values())
-        )
-        if no_filters_active and fav_ips:
-            def _fav_key(s):
-                ip = s.get("ip") or s.get("endpoint", {}).get("ip", "")
-                port = s.get("port") or s.get("gamePort") or s.get("endpoint", {}).get("port", 0)
-                return (ip, port) not in fav_ips
-            out.sort(key=_fav_key)
-
         visible = out[:500]
         clear_box(self.srv_box)
         self._expand_tracker[0] = None  # rows are being recreated, drop stale reference

@@ -2,8 +2,6 @@ import os, json, re, subprocess
 
 from steam_workshop import item_download_progress, item_ready, item_record, validate_mod_folder
 
-VERSION = "0.0.6"
-
 CONFIG_FILE = os.path.expanduser("~/.config/dzsl/config.json")
 FAVS_FILE   = os.path.expanduser("~/.config/dzsl/favorites.json")
 RECENT_FILE = os.path.expanduser("~/.config/dzsl/recent.json")

@@ -27,7 +27,7 @@ gi.require_version('Adw', '1')
 from gi.repository import Gtk, Adw, GLib, Gdk
 import threading, subprocess, time, os
 
-from config import load_cfg, save_cfg, save_json, load_json, FAVS_FILE, RECENT_FILE, is_steam_running, find_corrupt_mods, VERSION
+from config import load_cfg, save_cfg, save_json, load_json, FAVS_FILE, RECENT_FILE, is_steam_running, find_corrupt_mods
 from css import CSS
 from connect import Connector
 from ui.subscribe import launch_steam
@@ -36,7 +36,6 @@ from ui.favorites import ListView
 from ui.add_server import AddServerView
 from ui.mods import ModsView
 from ui.settings import SettingsView
-from ui.welcome import WelcomeView
 from ui.helpers import clear_box
 from applog import setup_logging, get_logger
 
@@ -454,12 +453,47 @@ class DZSL(Adw.Application):
             p.popover.popup()
 
     def _build_welcome(self):
-        WelcomeView(
-            self.panel,
-            self.show_view,
-            self.connector.connect,
-            self.favorites,
-        ).build()
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        outer.set_vexpand(True)
+        outer.set_valign(Gtk.Align.CENTER)
+        outer.set_halign(Gtk.Align.CENTER)
+
+        vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=20)
+        vbox.set_halign(Gtk.Align.CENTER)
+
+        img = Gtk.Image.new_from_icon_name("dzsl")
+        img.set_pixel_size(96)
+        vbox.append(img)
+
+        title = Gtk.Label(label="DZSL")
+        title.add_css_class("welcome-title")
+        vbox.append(title)
+
+        sub = Gtk.Label(label="DAYZ SERVER BROWSER FOR LINUX")
+        sub.add_css_class("welcome-sub")
+        vbox.append(sub)
+
+        spacer = Gtk.Box()
+        spacer.set_size_request(-1, 12)
+        vbox.append(spacer)
+
+        browse = Gtk.Button(label="BROWSE SERVERS")
+        browse.add_css_class("welcome-primary")
+        browse.set_halign(Gtk.Align.CENTER)
+        browse.connect("clicked", lambda _: self.show_view("servers"))
+        vbox.append(browse)
+
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        row.set_halign(Gtk.Align.CENTER)
+        for label, view in [("Favorites", "favorites"), ("Recent", "recent")]:
+            b = Gtk.Button(label=label)
+            b.add_css_class("welcome-secondary")
+            b.connect("clicked", lambda _, v=view: self.show_view(v))
+            row.append(b)
+        vbox.append(row)
+
+        outer.append(vbox)
+        self.panel.append(outer)
 
     def toggle_fav(self, server, btn=None):
         ip   = server.get("ip") or server.get("endpoint", {}).get("ip")
