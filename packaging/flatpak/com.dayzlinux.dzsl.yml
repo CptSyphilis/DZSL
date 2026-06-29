@@ -1,0 +1,39 @@
+app-id: com.dayzlinux.dzsl
+runtime: org.gnome.Platform
+runtime-version: "50"
+sdk: org.gnome.Sdk
+command: dzsl
+
+finish-args:
+  - --share=ipc
+  - --share=network
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  - --filesystem=~/.local/share/Steam
+  - --filesystem=~/.steam
+  - --filesystem=~/.var/app/com.valvesoftware.Steam
+  - --filesystem=/mnt
+  - --filesystem=/media
+  - --filesystem=/run/media
+
+cleanup:
+  - /lib/dzsl/tests
+  - /lib/dzsl/**/__pycache__
+  - /lib/dzsl/**/*.pyc
+
+modules:
+  - name: dzsl
+    buildsystem: simple
+    build-commands:
+      - install -d /app/lib/dzsl
+      - cp -a dzsl /app/lib/dzsl/
+      - install -Dm755 packaging/flatpak/dzsl-flatpak /app/bin/dzsl
+      - install -Dm644 packaging/flatpak/com.dayzlinux.dzsl.desktop /app/share/applications/com.dayzlinux.dzsl.desktop
+      - install -Dm644 packaging/flatpak/com.dayzlinux.dzsl.metainfo.xml /app/share/metainfo/com.dayzlinux.dzsl.metainfo.xml
+      - install -Dm644 dzsl/assets/icon-128.png /app/share/icons/hicolor/128x128/apps/com.dayzlinux.dzsl.png
+      - install -Dm644 dzsl/assets/icon-256.png /app/share/icons/hicolor/256x256/apps/com.dayzlinux.dzsl.png
+      - install -Dm644 dzsl/assets/icon-512.png /app/share/icons/hicolor/512x512/apps/com.dayzlinux.dzsl.png
+    sources:
+      - type: dir
+        path: ../..

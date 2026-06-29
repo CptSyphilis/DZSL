@@ -15,4 +15,4 @@ if [[ "${DZSL_USE_WAYLAND:-}" != "1" ]]; then
     fi
 fi
 
-exec python3 main.py "$@"
+exec python3 -m dzsl "$@"

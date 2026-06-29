@@ -179,6 +179,19 @@ check_dir() {
   [[ -d "${1}" ]] || err "Invalid/missing directory: ${1}"
 }
 
+check_port() {
+  [[ "${1}" =~ ^[0-9]+$ ]] && (( 1 <= 10#${1} && 10#${1} <= 65535 )) \
+    || err "Invalid port: ${1}"
+}
+
+check_server() {
+  [[ "${1}" =~ ^[A-Za-z0-9._:-]+$ ]] || err "Invalid server address: ${1}"
+}
+
+check_mod_id() {
+  [[ "${1}" =~ ^[0-9]+$ ]] || err "Invalid Workshop ID: ${1}"
+}
+
 check_dep() {
   command -v "${1}" >/dev/null 2>&1
 }
@@ -271,6 +284,7 @@ setup_mods() {
   local missing=0
 
   for modid in "${INPUT[@]}"; do
+    check_mod_id "${modid}"
     local modpath="${dir_workshop}/${modid}"
     if ! [[ -d "${modpath}" ]]; then
       missing=1
@@ -301,9 +315,9 @@ setup_mods() {
 
 run_steam() {
   if [[ "${STEAM}" == flatpak ]]; then
-    ( set -x; flatpak run "${FLATPAK_PARAMS[@]}" "${FLATPAK_STEAM}" "${@}"; )
+    flatpak run "${FLATPAK_PARAMS[@]}" "${FLATPAK_STEAM}" "${@}"
   else
-    ( set -x; "${STEAM}" "${@}"; )
+    "${STEAM}" "${@}"
   fi
 }
 
@@ -311,6 +325,12 @@ run_steam() {
 main() {
   check_deps
   resolve_steam
+
+  check_port "${PORT}"
+  [[ -z "${SERVER}" ]] || check_server "${SERVER}"
+  for modid in "${INPUT[@]}"; do
+    check_mod_id "${modid}"
+  done
 
   if [[ "${STEAM}" == flatpak ]]; then
     msg "Using flatpak mode"

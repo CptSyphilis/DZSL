@@ -1,0 +1,12 @@
+[Desktop Entry]
+Name=DZSL
+GenericName=DayZ Server Launcher
+Comment=Browse DayZ servers, manage Workshop mods, and launch DayZ
+Exec=dzsl %u
+Icon=com.dayzlinux.dzsl
+Terminal=false
+Type=Application
+Categories=Game;
+Keywords=DayZ;Steam;Server;Launcher;Workshop;
+MimeType=x-scheme-handler/dzsl;
+StartupNotify=true

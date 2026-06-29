@@ -8,6 +8,18 @@ SOURCE_DIR="$(cd "$BIN_DIR/.." && pwd)"
 INSTALL_DIR="${DZSL_INSTALL_DIR:-$HOME/DZSL}"
 CONFIG_FILE="$HOME/.config/dzsl/config.json"
 
+resolve_path() { readlink -f "$1" 2>/dev/null || realpath -m "$1"; }
+INSTALL_TARGET="$(resolve_path "$INSTALL_DIR")"
+if [[ -z "$INSTALL_TARGET" || "$INSTALL_TARGET" == "/" || "$INSTALL_TARGET" == "$(resolve_path "$HOME")" || "$INSTALL_TARGET" == "$(resolve_path "$SOURCE_DIR")" ]]; then
+    echo "Unsafe install path: $INSTALL_DIR" >&2
+    exit 1
+fi
+if [[ "$INSTALL_DIR" == *$'\n'* ]]; then
+    echo "Install path cannot contain a newline." >&2
+    exit 1
+fi
+umask 077
+
 # ── colours ──────────────────────────────────────────────────────────────────
 R='\033[0;31m'   # red
 Y='\033[0;33m'   # gold/amber
@@ -60,8 +72,6 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Gtk, Adw  # noqa: F401
-import requests  # noqa: F401
-import dotenv  # noqa: F401
 PY
 }
 
@@ -78,7 +88,7 @@ install_deps() {
     if ! command -v sudo >/dev/null; then
         _err "sudo not found. Install manually:"
         _white "  python3, python3-gi, gir1.2-gtk-4.0, gir1.2-adw-1,"
-        _white "  python3-requests, python3-dotenv, gawk, curl, jq"
+        _white "  python3, python3-gi, gir1.2-gtk-4.0, gir1.2-adw-1, gawk, curl, jq"
         exit 1
     fi
 
@@ -89,28 +99,28 @@ install_deps() {
             _step "Installing via apt..."
             sudo apt update -qq
             sudo apt install -y python3 python3-gi python3-gi-cairo \
-                gir1.2-gtk-4.0 gir1.2-adw-1 python3-requests python3-dotenv \
+                gir1.2-gtk-4.0 gir1.2-adw-1 \
                 gawk curl jq rsync
             ;;
         fedora|rhel|centos)
             _step "Installing via dnf..."
-            sudo dnf install -y python3 python3-gobject python3-requests \
-                python3-dotenv gtk4 libadwaita gawk curl jq rsync
+            sudo dnf install -y python3 python3-gobject \
+                gtk4 libadwaita gawk curl jq rsync
             ;;
         arch|manjaro|endeavouros)
             _step "Installing via pacman..."
-            sudo pacman -Sy --noconfirm python python-gobject python-requests \
-                python-dotenv gtk4 libadwaita gawk curl jq rsync
+            sudo pacman -Sy --noconfirm python python-gobject \
+                gtk4 libadwaita gawk curl jq rsync
             ;;
         opensuse*|sles)
             _step "Installing via zypper..."
-            sudo zypper install -y python3 python3-gobject python3-requests \
-                python3-dotenv typelib-1_0-Gtk-4_0 typelib-1_0-Adw-1 gawk curl jq rsync
+            sudo zypper install -y python3 python3-gobject \
+                typelib-1_0-Gtk-4_0 typelib-1_0-Adw-1 gawk curl jq rsync
             ;;
         *)
             _err "Unknown distro: $DISTRO"
             _white "  Install manually: python3, python3-gi, gir1.2-gtk-4.0, gir1.2-adw-1,"
-            _white "  python3-requests, python3-dotenv, gawk, curl, jq, rsync"
+            _white "  python3, python3-gi, GTK4, libadwaita, gawk, curl, jq, rsync"
             ;;
     esac
 
@@ -179,6 +189,9 @@ copy_app() {
     if command -v rsync >/dev/null; then
         rsync -a --delete \
             --exclude '.git' \
+            --exclude '.env' \
+            --exclude '.venv' \
+            --exclude 'my_env' \
             --exclude '__pycache__' \
             --exclude '*.pyc' \
             "$SOURCE_DIR/" "$INSTALL_DIR/"
@@ -187,6 +200,8 @@ copy_app() {
         mkdir -p "$INSTALL_DIR"
         cp -a "$SOURCE_DIR/." "$INSTALL_DIR/"
         rm -rf "$INSTALL_DIR/.git" 2>/dev/null || true
+        rm -f "$INSTALL_DIR/.env" 2>/dev/null || true
+        rm -rf "$INSTALL_DIR/.venv" "$INSTALL_DIR/my_env" 2>/dev/null || true
         find "$INSTALL_DIR" -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
         find "$INSTALL_DIR" -name '*.pyc' -delete 2>/dev/null || true
     fi
@@ -197,17 +212,16 @@ copy_app() {
 
 # ── write config ──────────────────────────────────────────────────────────────
 write_config() {
-    local launcher_path="$INSTALL_DIR/bin/dayz-launcher.sh"
     _step "Writing config..."
     mkdir -p "$HOME/.config/dzsl"
+    chmod 700 "$HOME/.config/dzsl"
 
-    python3 - "$CONFIG_FILE" "$STEAM_ROOT" "$launcher_path" <<'PY'
+    python3 - "$CONFIG_FILE" "$STEAM_ROOT" <<'PY'
 import json, os, sys
 
-path, steam_root, launcher_path = sys.argv[1:4]
+path, steam_root = sys.argv[1:3]
 defaults = {
     "steam_root": steam_root,
-    "launcher_path": launcher_path,
     "mods_dir": "",
     "profile_name": "",
     "extra_args": "",
@@ -227,9 +241,11 @@ if os.path.isfile(path):
             existing = json.load(f)
     except Exception:
         pass
-merged = {**defaults, **existing, "steam_root": steam_root, "launcher_path": launcher_path}
+existing.pop("launcher_path", None)
+merged = {**defaults, **existing, "steam_root": steam_root}
 with open(path, "w") as f:
     json.dump(merged, f, indent=2)
+os.chmod(path, 0o600)
 PY
     _ok "Config written."
 }
@@ -242,8 +258,8 @@ create_desktop_entry() {
 [Desktop Entry]
 Name=DZSL
 Comment=DayZ Server List for Linux
-Exec=$INSTALL_DIR/bin/dzsl.sh %u
-Icon=$INSTALL_DIR/assets/icon.png
+Exec="$INSTALL_DIR/bin/dzsl.sh" %u
+Icon=$INSTALL_DIR/dzsl/assets/icon.png
 Path=$INSTALL_DIR
 Terminal=false
 Type=Application

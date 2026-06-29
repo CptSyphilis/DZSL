@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.dayzlinux.dzsl</id>
+  <name>DZSL</name>
+  <summary>DayZ server launcher for Linux</summary>
+  <developer id="com.dayzlinux">
+    <name>DayZ Linux</name>
+  </developer>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <description>
+    <p>
+      DZSL is a Linux-native server browser and launcher for DayZ. Browse and
+      filter public servers, keep favorites and recent servers, prepare Steam
+      Workshop mods, and launch DayZ with the required connection parameters.
+    </p>
+    <p>
+      Steam and a Steam installation of DayZ are required. DZSL supports native
+      and Flatpak Steam installations and Steam libraries on additional drives.
+    </p>
+  </description>
+  <launchable type="desktop-id">com.dayzlinux.dzsl.desktop</launchable>
+  <provides>
+    <binary>dzsl</binary>
+  </provides>
+  <url type="homepage">https://dayzlinux.com/</url>
+  <url type="vcs-browser">https://github.com/CptSyphilis/DZSL</url>
+  <url type="bugtracker">https://github.com/CptSyphilis/DZSL/issues</url>
+  <content_rating type="oars-1.1" />
+  <releases>
+    <release version="0.0.6" date="2026-06-29" />
+  </releases>
+</component>

@@ -1,0 +1,3 @@
+#!/bin/sh
+export PYTHONPATH=/app/lib/dzsl
+exec python3 -m dzsl "$@"
