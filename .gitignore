@@ -47,18 +47,28 @@ Thumbs.db
 # Project specific
 *.log
 config.ini
-CLAUDE.md
 /screenshots
 .env
 files.zip
 readthis.txt
+notes
 notes.txt
+updatelogs
+asdf/
 .~lock.*
 
-# AI tooling
+# Flatpak build output (never commit build cache/artifacts)
+.flatpak-builder/
+packaging/flatpak/build-dir/
+packaging/flatpak/.flatpak-builder/
+
+# AI tooling / logs
 .claude/
 .codex/
 .agents/
+CLAUDE.md
+CODEX.md
+AGENTS.md
 
 # Assets not for distribution
 assets/dzsl-bg.svg
