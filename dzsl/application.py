@@ -10,10 +10,11 @@ gi.require_version('Adw', '1')
 from gi.repository import Gtk, Adw, GLib, Gdk, Gio
 import threading, subprocess, time
 
-from dzsl.core.config import load_cfg, save_cfg, save_json, load_json, FAVS_FILE, RECENT_FILE, is_steam_running, find_corrupt_mods, VERSION
+from dzsl.core.config import load_cfg, save_cfg, save_json, load_json, FAVS_FILE, RECENT_FILE, is_steam_ready, find_corrupt_mods, VERSION
 from dzsl.core.constants import APPLICATION_ID
 from dzsl.core.logging import setup_logging, get_logger
 from dzsl.core.uri import parse_connect_uri
+from dzsl.lifecycle import cancel_active_downloads
 from dzsl.paths import ASSETS_DIR
 from dzsl.services.connector import Connector
 from dzsl.services.server_api import fetch_server
@@ -42,6 +43,7 @@ class DZSL(Adw.Application):
         self.favorites = load_json(FAVS_FILE)
         self.current_view = "welcome"
         self._pending_connect = None
+        self._steam_ready = False
 
     def on_command_line(self, _app, command_line):
         for raw_arg in command_line.get_arguments()[1:]:
@@ -182,9 +184,9 @@ class DZSL(Adw.Application):
 
         self.win.set_content(root)
         self.win.connect("realize", self._on_window_realize)
+        self._show_steam_wait_screen()
         self.win.present()
 
-        self._steam_ready = False
         self._start_steam_enforcement()
 
     def _on_window_realize(self, win):
@@ -212,16 +214,25 @@ class DZSL(Adw.Application):
 
     def _check_steam_running_async(self, callback):
         def worker():
-            running = is_steam_running()
-            GLib.idle_add(callback, running)
+            ready = is_steam_ready()
+            GLib.idle_add(callback, ready)
         threading.Thread(target=worker, daemon=True).start()
 
     def _update_steam_status(self):
         self._check_steam_running_async(
-            lambda running: self.set_status(
-                "Ready" if running else "Ready — start Steam to launch DayZ"
-            )
+            self._on_steam_status
         )
+
+    def _on_steam_status(self, ready):
+        if ready:
+            self.set_status("Ready")
+            return
+        self._steam_ready = False
+        self.set_status("Steam is not ready. DZSL is locked.")
+        self._show_steam_wait_screen()
+        if not getattr(self, "_recheck_source", None):
+            launch_steam()
+            self._recheck_source = GLib.timeout_add_seconds(2, self._recheck_tick)
 
     def _poll_steam_status(self):
         current = self.status_lbl.get_text()
@@ -230,11 +241,10 @@ class DZSL(Adw.Application):
         return True
 
     def _start_steam_enforcement(self):
-        """On app launch, ALWAYS check if Steam is running. Block the app until it is."""
         self._check_steam_running_async(self._on_initial_steam_check)
 
-    def _on_initial_steam_check(self, running):
-        if running:
+    def _on_initial_steam_check(self, ready):
+        if ready:
             self._steam_ready = True
             self.set_status("Ready")
             self.show_view(self.current_view)
@@ -252,8 +262,8 @@ class DZSL(Adw.Application):
         self._check_steam_running_async(self._on_recheck_result)
         return True
 
-    def _on_recheck_result(self, running):
-        if running:
+    def _on_recheck_result(self, ready):
+        if ready:
             self._steam_ready = True
             self.set_status("Ready")
             self._hide_steam_wait_screen()
@@ -325,12 +335,15 @@ class DZSL(Adw.Application):
         self.clear_panel()
 
     def _manual_steam_check(self):
-        if is_steam_running():
+        if is_steam_ready():
             self._steam_ready = True
             self.set_status("Ready")
             self._hide_steam_wait_screen()
             self.show_view(self.current_view)
             self._dispatch_pending_connect()
+            if getattr(self, "_recheck_source", None):
+                GLib.source_remove(self._recheck_source)
+                self._recheck_source = None
         else:
             self.set_status("Steam still not detected — launching...")
             launch_steam()
@@ -377,6 +390,9 @@ class DZSL(Adw.Application):
         GLib.idle_add(self._connect_linked_server, server)
 
     def _connect_linked_server(self, server):
+        if not self._steam_ready:
+            self._show_steam_wait_screen()
+            return False
         self.win.present()
         self.connector.connect(server)
         return False
@@ -391,7 +407,7 @@ class DZSL(Adw.Application):
         self.show_view("welcome" if self.current_view == view else view)
 
     def show_view(self, view):
-        if not getattr(self, "_steam_ready", False) and not is_steam_running():
+        if not self._steam_ready:
             self._show_steam_wait_screen()
             return
         log.info("View switched to %s", view)
@@ -436,7 +452,7 @@ class DZSL(Adw.Application):
         dlg.present(self.win)
 
     def _on_close_request(self, win):
-        _kill_downloads()
+        cancel_active_downloads(self)
         maximized = win.is_maximized()
         self.cfg["window_maximized"] = maximized
         if not maximized:

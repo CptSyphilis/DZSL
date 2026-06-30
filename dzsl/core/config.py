@@ -138,6 +138,24 @@ def save_json(path, data):
 
 STEAM_PID_FILE = os.path.expanduser("~/.steam/steam.pid")
 STEAM_CLIENT_BIN = os.path.expanduser("~/.steam/root/ubuntu12_32/steam")
+STEAM_PIPE_PATHS = (
+    os.path.expanduser("~/.steam/steam.pipe"),
+    os.path.expanduser("~/.var/app/com.valvesoftware.Steam/.steam/steam.pipe"),
+    os.path.expanduser("~/.var/app/com.valvesoftware.Steam/.local/share/Steam/steam.pipe"),
+)
+
+def _steam_pipe_ready(paths=STEAM_PIPE_PATHS):
+    for path in paths:
+        try:
+            fd = os.open(path, os.O_WRONLY | os.O_NONBLOCK)
+        except OSError:
+            continue
+        os.close(fd)
+        return True
+    return False
+
+def is_steam_ready():
+    return _steam_pipe_ready()
 
 def _pid_alive(pid):
     try:
@@ -166,7 +184,7 @@ def _is_steam_client_process(pid):
 def is_steam_running():
     """True when the Steam client is running (not steamcmd or stale pid files)."""
     if is_flatpak():
-        return True
+        return is_steam_ready()
     try:
         with open(STEAM_PID_FILE) as f:
             pid = int(f.read().strip())
@@ -321,6 +339,9 @@ def mod_installed(cfg, mod_id):
     mid = str(mod_id)
     manifests = workshop_acf_paths(cfg)
     if manifests:
+        downloaded, total = item_download_progress(manifests, mid)
+        if total and downloaded < total:
+            return False
         record = item_record(manifests, mid)
         if record.get("installed"):
             return item_ready(manifests, workshop_dirs(cfg), mid)
