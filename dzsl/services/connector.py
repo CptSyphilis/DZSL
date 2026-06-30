@@ -11,6 +11,7 @@ from dzsl.core.logging import get_logger
 from dzsl.paths import ENV_FILE
 from dzsl.runtime import is_flatpak, open_external_uri
 from dzsl.services.dayz import ModSetupError, build_launch_command, build_launch_uri, setup_mod_links
+from dzsl.services.launch_gate import launch_block_reason
 from dzsl.services.server_api import fetch_server
 from dzsl.steam import gate as workshop_gate
 
@@ -293,6 +294,10 @@ class Connector:
     def _run_launcher(self, server, mod_ids=None, launch=True, password=None):
         try:
             ids = self._effective_mod_ids(mod_ids)
+            if launch:
+                blocked = launch_block_reason(self.cfg, ids)
+                if blocked:
+                    return subprocess.CompletedProcess(args=[], returncode=1, stdout="", stderr=blocked)
             mod_links = setup_mod_links(self.cfg, ids)
             if not launch:
                 return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
