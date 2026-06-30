@@ -1,5 +1,3 @@
-import json
-import os
 import subprocess
 import sys
 import threading
@@ -64,21 +62,20 @@ class SteamSubscriptionManager:
     def subscribe_mod_steam(self, mod_id, mod_name=None):
         mid = str(mod_id)
         log.info("Subscribing through Steam: %s (%s)", mod_name or mid, mid)
-        try:
-            if is_flatpak():
-                return self.forward_steam_uri(f"steam://installworkshop/221100/{mid}")
-            result = subprocess.run(
-                [sys.executable, "-m", "dzsl.steam.api", "subscribe", mid],
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-            if result.returncode == 0:
-                return True
-            error = (result.stderr or result.stdout or "helper failed").strip().splitlines()[-1]
-            log.warning("Native Steam API helper failed: %s", error)
-        except (OSError, subprocess.SubprocessError) as exc:
-            log.warning("Native Steam API helper unavailable: %s", exc)
+        if not is_flatpak():
+            try:
+                result = subprocess.run(
+                    [sys.executable, "-m", "dzsl.steam.api", "subscribe", mid],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
+                if result.returncode == 0:
+                    return True
+                error = (result.stderr or result.stdout or "helper failed").strip().splitlines()[-1]
+                log.warning("Native Steam subscribe failed: %s", error)
+            except (OSError, subprocess.SubprocessError) as exc:
+                log.warning("Native Steam subscribe unavailable: %s", exc)
         return self.forward_steam_uri(f"steam://installworkshop/221100/{mid}")
 
     def sync_steam_subscriptions(self, mod_ids, start_if_needed=True):
@@ -98,11 +95,6 @@ class SteamSubscriptionManager:
     def wait_for_mod_installed(self, mod_id, progress, mod_name, size_bytes=0):
         mid = str(mod_id)
         self.set_status(f"Waiting for {mod_name} download...")
-        native_result = self._wait_with_native_monitor(mid, progress, mod_name, size_bytes)
-        if native_result is not None:
-            return native_result
-
-        log.warning("Steam API monitor unavailable for %s; using Workshop manifest", mod_name)
         start = time.time()
         step = 2
         steps = 3600 // step
@@ -137,70 +129,3 @@ class SteamSubscriptionManager:
         if not ok:
             log.error("Timed out waiting for %s after %ds", mod_name, int(time.time() - start))
         return ok
-
-    def _wait_with_native_monitor(self, mid, progress, mod_name, size_bytes):
-        if is_flatpak():
-            return None
-        try:
-            proc = subprocess.Popen(
-                [sys.executable, "-m", "dzsl.steam.api", "monitor", mid],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
-                text=True,
-                bufsize=1,
-            )
-        except OSError:
-            return None
-
-        previous_bytes = 0
-        previous_time = time.monotonic()
-        received = False
-        try:
-            for line in proc.stdout:
-                if progress and progress.is_cancelled():
-                    proc.terminate()
-                    proc.wait(timeout=5)
-                    log.info("Wait for %s cancelled by user", mod_name)
-                    return False
-                try:
-                    snapshot = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                received = True
-                downloaded = int(snapshot.get("downloaded", 0) or 0)
-                steam_total = int(snapshot.get("total", 0) or 0)
-                total = steam_total or size_bytes
-                fraction = downloaded / total if total else 0.0
-                now = time.monotonic()
-                if progress:
-                    progress.set_mod_progress(mid, fraction, downloaded, total)
-                    if snapshot.get("downloading"):
-                        progress.set_mod_status(mid, f"{int(fraction * 100)}%", "active")
-                        progress.set_action_prompt(f"Steam is downloading: {mod_name}")
-                    elif snapshot.get("pending"):
-                        progress.set_mod_status(mid, "Pending in Steam", "active")
-                    elif snapshot.get("subscribed"):
-                        progress.set_mod_status(mid, "Waiting for Steam", "active")
-                    elapsed = now - previous_time
-                    if downloaded > previous_bytes and elapsed >= 0.25:
-                        rate = (downloaded - previous_bytes) / elapsed
-                        progress.set_speed(self._format_rate(rate))
-                previous_bytes, previous_time = downloaded, now
-                if snapshot.get("installed") and not snapshot.get("needs_update"):
-                    proc.wait(timeout=5)
-                    log.info("%s installed and current according to Steam", mod_name)
-                    return True
-            proc.wait(timeout=5)
-        except (OSError, subprocess.SubprocessError):
-            if proc.poll() is None:
-                proc.terminate()
-            return None if not received else False
-        return None if not received else proc.returncode == 0
-
-    @staticmethod
-    def _format_rate(rate):
-        if rate >= 1024 ** 2:
-            return f"{rate / 1024 ** 2:.1f} MB/s"
-        if rate >= 1024:
-            return f"{rate / 1024:.1f} KB/s"
-        return f"{rate:.0f} B/s"
