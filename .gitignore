@@ -76,3 +76,7 @@ AGENTS.md
 assets/dzsl-bg.svg
 assets/AGENTS.md
 assets/build_bg.py
+tests/test_launch_gate.py
+tests/test_lifecycle.py
+tests/test_steam_download_state.py
+tests/test_steam_readiness.py
