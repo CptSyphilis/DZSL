@@ -1,0 +1,86 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+pip-wheel-metadata/
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv/
+my_env/
+
+# IDE / Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
+*.log
+config.ini
+/screenshots
+.env
+files.zip
+readthis.txt
+notes
+notes.txt
+updatelogs
+WORKFLOW.md
+workorder-*.md
+asdf/
+.~lock.*
+
+# Flatpak build output (never commit build cache/artifacts)
+.flatpak-builder/
+packaging/flatpak/build-dir/
+packaging/flatpak/.flatpak-builder/
+
+# AI tooling / logs
+.claude/
+.codex/
+.agents/
+CLAUDE.md
+CODEX.md
+AGENTS.md
+
+# Assets not for distribution
+assets/dzsl-bg.svg
+assets/AGENTS.md
+assets/build_bg.py
+tests/test_launch_gate.py
+tests/test_lifecycle.py
+tests/test_steam_download_state.py
+tests/test_steam_readiness.py
+.gitignore
+tests/test_steam_download_state.py
+tests/test_steam_readiness.py
+tests/test_lifecycle.py

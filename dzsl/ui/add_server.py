@@ -1,0 +1,92 @@
+import gi
+gi.require_version('Gtk', '4.0')
+gi.require_version('Adw', '1')
+from gi.repository import Gtk, GLib
+import threading
+from dzsl.core.config import save_json, FAVS_FILE
+from dzsl.core.uri import validate_host_port
+from dzsl.services.server_api import fetch_server
+
+class AddServerView:
+    def __init__(self, panel, favorites, set_status):
+        self.panel      = panel
+        self.favorites  = favorites
+        self.set_status = set_status
+        self._queried   = None
+
+    def build(self):
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL); outer.set_vexpand(True)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        box.add_css_class("settings-group")
+        box.set_halign(Gtk.Align.CENTER); box.set_valign(Gtk.Align.CENTER)
+        box.set_vexpand(True); box.set_size_request(380, -1)
+
+        lbl = Gtk.Label(label="ADD SERVER"); lbl.add_css_class("settings-title"); lbl.set_halign(Gtk.Align.START); box.append(lbl)
+
+        paste_btn = Gtk.Button(label="Paste IP from Clipboard")
+        paste_btn.add_css_class("btn-ghost")
+        def do_paste(b):
+            from gi.repository import Gdk
+            display = Gdk.Display.get_default()
+            clipboard = display.get_clipboard()
+            def on_text(clip, result):
+                try:
+
+                    text = clip.read_text_finish(result).strip()
+                    if ":" in text:
+                        parts = text.rsplit(":", 1)
+                        self.ip_e.set_text(parts[0])
+                        self.pt_e.set_text(parts[1])
+                    else:
+                        self.ip_e.set_text(text)
+                except:
+                    pass
+
+            clipboard.read_text_async(None, on_text)
+        paste_btn.connect("clicked", do_paste)
+        box.append(paste_btn)
+
+        self.ip_e = Gtk.Entry(); self.ip_e.set_placeholder_text("Server IP  e.g. 193.25.252.82"); self.ip_e.add_css_class("settings-input"); box.append(self.ip_e)
+        self.pt_e = Gtk.Entry(); self.pt_e.set_placeholder_text("Game port  e.g. 2402"); self.pt_e.add_css_class("settings-input"); box.append(self.pt_e)
+        self.nm_e = Gtk.Entry(); self.nm_e.set_placeholder_text("Name (optional — auto-detected)"); self.nm_e.add_css_class("settings-input"); box.append(self.nm_e)
+
+        self.res = Gtk.Label(label=""); self.res.add_css_class("status-txt"); box.append(self.res)
+
+        brow = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        qb = Gtk.Button(label="Query server"); qb.add_css_class("btn-ghost"); qb.connect("clicked", self._query); brow.append(qb)
+        ab = Gtk.Button(label="Add to Favorites"); ab.add_css_class("btn-connect"); ab.connect("clicked", self._add); brow.append(ab)
+        box.append(brow); outer.append(box); self.panel.append(outer)
+
+    def _query(self, b):
+        ip = self.ip_e.get_text().strip()
+        pt = self.pt_e.get_text().strip() or "2302"
+        try:
+            ip, pt_value = validate_host_port(ip, pt)
+        except ValueError as exc:
+            self.res.set_text(str(exc).capitalize() + ".")
+            return
+        self.res.set_text("Querying…")
+        def q():
+            try:
+                d = fetch_server(ip, pt_value, timeout=8)
+                self._queried = {"ip": ip, "port": pt_value, "name": d.get("name", f"{ip}:{pt_value}"), "map": d.get("map", "?"), "players": d.get("players", 0), "maxPlayers": d.get("maxPlayers", 0), "mods": d.get("mods", []), "firstPersonOnly": d.get("firstPersonOnly", False)}
+                GLib.idle_add(self.res.set_text, f"Found: {self._queried['name']}")
+            except (OSError, RuntimeError, ValueError):
+                self._queried = {"ip": ip, "port": pt_value, "name": self.nm_e.get_text() or f"{ip}:{pt_value}", "map": "?", "players": 0, "maxPlayers": 0, "mods": [], "firstPersonOnly": False}
+                GLib.idle_add(self.res.set_text, "Could not query — will save manually.")
+        threading.Thread(target=q, daemon=True).start()
+
+    def _add(self, b):
+        ip = self.ip_e.get_text().strip()
+        pt = self.pt_e.get_text().strip() or "2302"
+        try:
+            ip, pt_value = validate_host_port(ip, pt)
+        except ValueError as exc:
+            self.res.set_text(str(exc).capitalize() + ".")
+            return
+        srv = self._queried or {"ip": ip, "port": pt_value, "name": self.nm_e.get_text() or f"{ip}:{pt_value}", "map": "?", "players": 0, "maxPlayers": 0, "mods": [], "firstPersonOnly": False}
+        if not any(f.get("ip") == ip and str(f.get("port")) == str(pt_value) for f in self.favorites):
+            self.favorites.append(srv); save_json(FAVS_FILE, self.favorites)
+            self.res.set_text("OK Added to Favorites"); self.set_status(f"Saved {srv['name']}")
+        else:
+            self.res.set_text("Already in Favorites.")
