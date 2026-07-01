@@ -91,24 +91,10 @@ def folder_has_content(path):
         return False
 
 
-def _meaningful_file(path):
-    try:
-        if os.path.getsize(path) <= 0:
-            return False
-        with open(path, "rb") as handle:
-            return bool(handle.read(4096).strip(b"\x00\t\r\n "))
-    except OSError:
-        return False
-
-
 def validate_mod_folder(path):
     """Validate the minimum on-disk structure required by a DayZ mod."""
     if not os.path.isdir(path):
         return False, "mod folder is missing"
-
-    metadata = [os.path.join(path, name) for name in ("meta.cpp", "mod.cpp")]
-    if not any(_meaningful_file(candidate) for candidate in metadata):
-        return False, "meta.cpp/mod.cpp is missing or empty"
 
     found_pbo = False
     for root, dirs, files in os.walk(path):

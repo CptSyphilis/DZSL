@@ -33,6 +33,7 @@ class WelcomeView:
             picture = Gtk.Picture.new_for_filename(BG_PATH)
             picture.set_content_fit(Gtk.ContentFit.COVER)
             picture.set_can_shrink(True)
+            picture.set_size_request(1, 1)
             picture.set_vexpand(True)
             picture.set_hexpand(True)
             overlay.set_child(picture)

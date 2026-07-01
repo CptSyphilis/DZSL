@@ -10,7 +10,7 @@ gi.require_version('Adw', '1')
 from gi.repository import Gtk, Adw, GLib, Gdk, Gio
 import threading, subprocess, time
 
-from dzsl.core.config import load_cfg, save_cfg, save_json, load_json, FAVS_FILE, RECENT_FILE, is_steam_ready, find_corrupt_mods, VERSION
+from dzsl.core.config import load_cfg, save_cfg, save_json, load_json, FAVS_FILE, RECENT_FILE, is_steam_ready, VERSION
 from dzsl.core.constants import APPLICATION_ID
 from dzsl.core.logging import setup_logging, get_logger
 from dzsl.core.uri import parse_connect_uri
@@ -225,11 +225,11 @@ class DZSL(Adw.Application):
 
     def _on_steam_status(self, ready):
         if ready:
+            self._steam_ready = True
             self.set_status("Ready")
             return
         self._steam_ready = False
-        self.set_status("Steam is not ready. DZSL is locked.")
-        self._show_steam_wait_screen()
+        self.set_status("Steam is not ready. Browsing remains available; connecting will start Steam.")
         if not getattr(self, "_recheck_source", None):
             launch_steam()
             self._recheck_source = GLib.timeout_add_seconds(2, self._recheck_tick)
@@ -250,7 +250,6 @@ class DZSL(Adw.Application):
             self.show_view(self.current_view)
             self._dispatch_pending_connect()
             GLib.timeout_add_seconds(5, self._poll_steam_status)
-            threading.Thread(target=self._scan_corrupt_mods, daemon=True).start()
             return
 
         self.set_status("Steam is required to use DZSL. Starting Steam...")
@@ -273,22 +272,8 @@ class DZSL(Adw.Application):
                 GLib.source_remove(self._recheck_source)
                 self._recheck_source = None
             GLib.timeout_add_seconds(5, self._poll_steam_status)
-            threading.Thread(target=self._scan_corrupt_mods, daemon=True).start()
         else:
             self.set_status("Waiting for Steam to start...")
-
-    def _scan_corrupt_mods(self):
-        import shutil
-        corrupt = find_corrupt_mods(self.cfg)
-        if not corrupt:
-            return
-        for path in corrupt:
-            log.warning("Removing corrupt mod directory: %s", path)
-            try:
-                shutil.rmtree(path)
-            except OSError as e:
-                log.error("Could not remove %s: %s", path, e)
-        GLib.idle_add(self.set_status, f"Cleaned up {len(corrupt)} corrupt mod folder(s) on startup")
 
     def _show_steam_wait_screen(self):
         self.clear_panel()
@@ -325,13 +310,7 @@ class DZSL(Adw.Application):
 
         self.panel.append(vbox)
 
-        # Disable header navigation while waiting for Steam
-        for b in self.header_btns.values():
-            b.set_sensitive(False)
-
     def _hide_steam_wait_screen(self):
-        for b in self.header_btns.values():
-            b.set_sensitive(True)
         self.clear_panel()
 
     def _manual_steam_check(self):
@@ -407,9 +386,6 @@ class DZSL(Adw.Application):
         self.show_view("welcome" if self.current_view == view else view)
 
     def show_view(self, view):
-        if not self._steam_ready:
-            self._show_steam_wait_screen()
-            return
         log.info("View switched to %s", view)
         self.current_view = view
         self.back_btn.set_visible(view != "welcome")
@@ -545,4 +521,7 @@ class DZSL(Adw.Application):
         save_json(FAVS_FILE, self.favorites)
 
 def main():
-    return DZSL().run()
+    try:
+        return DZSL().run()
+    except KeyboardInterrupt:
+        return 130

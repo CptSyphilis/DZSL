@@ -5,13 +5,11 @@ from __future__ import annotations
 import base64
 import os
 import shutil
-import shlex
 import subprocess
 from urllib.parse import quote
 
 from dzsl.core.config import DAYZ_APPID, steam_library_root, workshop_dirs
 from dzsl.steam.workshop import validate_mod_folder
-
 
 class ModSetupError(RuntimeError):
     pass
@@ -97,9 +95,8 @@ def steam_launch_prefix():
 
 
 def build_launch_command(server_address, mod_links, profile_name="", game_params=None):
-    return steam_launch_prefix() + ["-applaunch", DAYZ_APPID] + build_launch_arguments(
-        server_address, mod_links, profile_name, game_params
-    )
+    arguments = build_launch_arguments(server_address, mod_links, profile_name, game_params)
+    return steam_launch_prefix() + ["-applaunch", str(DAYZ_APPID)] + arguments
 
 
 def build_launch_arguments(server_address, mod_links, profile_name="", game_params=None):
@@ -116,5 +113,5 @@ def build_launch_arguments(server_address, mod_links, profile_name="", game_para
 
 def build_launch_uri(server_address, mod_links, profile_name="", game_params=None):
     arguments = build_launch_arguments(server_address, mod_links, profile_name, game_params)
-    encoded = quote(shlex.join(arguments), safe="")
+    encoded = quote(subprocess.list2cmdline(arguments), safe="")
     return f"steam://run/{DAYZ_APPID}//{encoded}/"

@@ -1,8 +1,5 @@
 import datetime
 import os
-import shutil
-import subprocess
-import sys
 import threading
 
 import gi
@@ -16,7 +13,7 @@ from dzsl.http import RequestError
 from dzsl.paths import ENV_FILE
 from dzsl.steam.workshop import validate_mod_folder
 from dzsl.steam.web_api import player_summaries, published_file_details
-from dzsl.ui.helpers import clear_box, forward_steam_uri
+from dzsl.ui.helpers import clear_box, forward_steam_uri, unsubscribe_mod_ids
 from dzsl.ui.workshop_actions import WorkshopActionRunner
 
 load_environment(ENV_FILE)
@@ -434,23 +431,19 @@ class ModsView:
             self.set_status("Could not open Steam — start Steam and try again.")
 
     def _unsub_mod(self, mod, on_done=None):
+        from dzsl.lifecycle import cancel_active_downloads
+
+        root = self.panel.get_root()
+        app = root.get_application() if root else None
+        if app:
+            cancel_active_downloads(app)
+
         def do():
-            mid, name, path = mod["id"], mod["name"], mod["path"]
-            unsubscribed = False
-            try:
-                result = subprocess.run(
-                    [sys.executable, "-m", "dzsl.steam.api", "unsubscribe", mid],
-                    capture_output=True,
-                    text=True,
-                    timeout=30,
-                )
-                unsubscribed = result.returncode == 0
-            except (OSError, subprocess.SubprocessError):
-                pass
-            shutil.rmtree(path, ignore_errors=True)
-            message = f"Removed and unsubscribed {name}" if unsubscribed else f"Removed local files for {name}; Steam unsubscribe failed"
+            mid, name = mod["id"], mod["name"]
+            removed, error = unsubscribe_mod_ids([mid], self.cfg)
+            message = f"Removed and unsubscribed {name}" if removed else f"Steam unsubscribe failed for {name}: {error}"
             GLib.idle_add(self.set_status, message)
-            if on_done:
+            if on_done and removed:
                 GLib.idle_add(on_done)
         threading.Thread(target=do, daemon=True).start()
 

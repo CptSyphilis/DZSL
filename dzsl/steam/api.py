@@ -97,14 +97,13 @@ class SteamWorkshopAPI:
         lib.SteamAPI_ISteamUGC_UnsubscribeItem.argtypes = [ctypes.c_void_p, ctypes.c_uint64]
         lib.SteamAPI_ISteamUGC_UnsubscribeItem.restype = ctypes.c_uint64
 
-    def subscribe_and_download(self, mod_id):
+    def subscribe(self, mod_id):
         with self.lock:
             if not self.initialize():
                 return False
             call = self.lib.SteamAPI_ISteamUGC_SubscribeItem(self.ugc, int(mod_id))
             self.lib.SteamAPI_RunCallbacks()
-            queued = self.lib.SteamAPI_ISteamUGC_DownloadItem(self.ugc, int(mod_id), True)
-            return bool(call) and bool(queued)
+            return bool(call)
 
     def unsubscribe(self, mod_id):
         with self.lock:
@@ -128,7 +127,7 @@ def _workshop_command(command, mod_ids):
     try:
         for mod_id in mod_ids:
             if command == "subscribe":
-                ok = mod_id.isdigit() and api.subscribe_and_download(mod_id)
+                ok = mod_id.isdigit() and api.subscribe(mod_id)
             else:
                 ok = mod_id.isdigit() and api.unsubscribe(mod_id)
             if not ok:

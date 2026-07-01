@@ -267,17 +267,6 @@ def subscribed_mod_ids_from_server(server, cfg=None):
     cfg = cfg or load_cfg()
     return [mid for mid in mod_ids_from_server(server) if mod_subscribed(cfg, mid)]
 
-def notify_check_steam():
-    if is_flatpak():
-        return
-    try:
-        subprocess.run(
-            ["notify-send", "-a", "DZSL", "DZSL", "Check Steam — it may be waiting for you to confirm a Workshop subscription."],
-            capture_output=True, timeout=6,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        pass
-
 def forward_steam_uri(uri):
     if not isinstance(uri, str) or not uri.startswith("steam://") or len(uri) > 2048:
         return False
@@ -313,16 +302,33 @@ def forward_steam_uri(uri):
 
 def unsubscribe_mod_ids(mod_ids, cfg=None):
     import shutil
+    import sys
     from dzsl.core.config import workshop_dirs, load_cfg
+    ids = list(dict.fromkeys(
+        str(mid).strip() for mid in mod_ids if str(mid).strip().isdigit()
+    ))
+    if not ids:
+        return [], "No valid Workshop mod IDs were provided."
+    try:
+        result = subprocess.run(
+            [sys.executable, "-m", "dzsl.steam.api", "unsubscribe", *ids],
+            capture_output=True,
+            text=True,
+            timeout=max(30, len(ids) * 2),
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return [], str(exc)
+    if result.returncode != 0:
+        error = (result.stderr or result.stdout or "Steam rejected the unsubscribe request").strip()
+        return [], error.splitlines()[-1]
+
     dirs = workshop_dirs(cfg or load_cfg())
-    for mid in mod_ids:
-        mid = str(mid).strip()
-        if not mid.isdigit():
-            continue
+    for mid in ids:
         for wd in dirs:
             path = os.path.join(wd, mid)
             if os.path.isdir(path):
                 shutil.rmtree(path, ignore_errors=True)
+    return ids, ""
 
 def prompt_unsubscribe_server_mods(parent, server, set_status=None):
     import gi
@@ -379,10 +385,18 @@ def prompt_unsubscribe_server_mods(parent, server, set_status=None):
         if set_status:
             set_status(f"Unsubscribing from {len(ids)} mod(s)…")
 
+        from dzsl.lifecycle import cancel_active_downloads
+        app = win.get_application()
+        if app:
+            cancel_active_downloads(app)
+
         def work():
-            unsubscribe_mod_ids(ids)
+            removed, error = unsubscribe_mod_ids(ids, cfg)
             if set_status:
-                GLib.idle_add(set_status, f"Unsubscribed from {len(ids)} mod(s) for {name}")
+                if error:
+                    GLib.idle_add(set_status, f"Steam unsubscribe failed: {error}")
+                else:
+                    GLib.idle_add(set_status, f"Unsubscribed from {len(removed)} mod(s) for {name}")
 
         threading.Thread(target=work, daemon=True).start()
 

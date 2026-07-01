@@ -135,9 +135,11 @@ class Connector:
 
     def _mods_from_server(self, server):
         mods = []
+        seen = set()
         for m in filter_server_mods(server.get("mods") or []):
             mid = str(m.get("steamWorkshopId") or m.get("id") or "").strip()
-            if mid.isdigit():
+            if mid.isdigit() and mid not in seen:
+                seen.add(mid)
                 mods.append(mid)
         return mods
 
@@ -218,9 +220,11 @@ class Connector:
     def _get_server_mods(self, ip, query_port):
         info = self._get_server_info(ip, query_port)
         ids = []
+        seen = set()
         for mod in info.get("mods", []):
             mod_id = str(mod.get("steamWorkshopId") or mod.get("id") or "").strip()
-            if mod_id.isdigit():
+            if mod_id.isdigit() and mod_id not in seen:
+                seen.add(mod_id)
                 ids.append(mod_id)
         return ids
 
@@ -350,15 +354,6 @@ class Connector:
             on_open_downloads=self._open_steam_downloads,
         )
         self.set_downloading(True, progress)
-        try:
-            subprocess.Popen(
-                ["notify-send", "-a", "DZSL", "-u", "normal",
-                 "Downloading mods…",
-                 f"Downloading {len(queue)} mod(s). Don't launch DayZ until complete."],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            )
-        except OSError:
-            pass
         threading.Thread(
             target=self._dl_and_finish,
             args=(queue, sizes, server, mod_names, name, launch, password, progress),
@@ -368,7 +363,7 @@ class Connector:
     def _schedule_mod_download(self, queue, sizes, server, mod_names, name, launch, password):
         self._download_scheduled = True
         def run():
-            self._open_mod_progress(queue, sizes, server, mod_names, name, launch, password)
+            self._show_dl_dialog(queue, sizes, server, mod_names, name, launch, password)
             return False
         GLib.idle_add(run)
 
@@ -461,7 +456,7 @@ class Connector:
                 self._sync_steam_subscriptions(server_mods, start_if_needed=False)
             self.set_status(f"Mods ready for {name}")
 
-    def _show_dl_dialog(self, mod_ids, server, mod_names, name, launch, password):
+    def _show_dl_dialog(self, mod_ids, sizes, server, mod_names, name, launch, password):
         names = mod_names or {}
         lines = [f"• {names.get(m, m)}" for m in mod_ids]
         action = "download, set up mods, and connect" if launch else "download and set up mods"
@@ -475,17 +470,20 @@ class Connector:
         d.add_response("cancel", "Cancel")
         d.add_response("dl", "Download & Connect" if launch else "Download Mods")
         d.set_response_appearance("dl", Adw.ResponseAppearance.SUGGESTED)
-        def on_r(_, r):
+        d.set_default_response("cancel")
+        d.set_close_response("cancel")
+        self.set_status(f"Waiting for confirmation to download {len(mod_ids)} mod(s).")
+
+        def on_r(dialog, r):
+            dialog.destroy()
             if r != "dl":
+                self._busy = False
+                self._download_scheduled = False
+                self._finish_workshop_operation()
+                self.set_status("Mod download cancelled.")
                 return
-
-            def begin_download():
-                self._refresh_cfg()
-                queue, sizes = self._prepare_mod_queue(mod_ids, names)
-                self._open_mod_progress(queue, sizes, server, mod_names, name, launch, password)
-                return False
-
-            GLib.idle_add(begin_download)
+            self._refresh_cfg()
+            self._open_mod_progress(mod_ids, sizes, server, mod_names, name, launch, password)
 
         d.connect("response", on_r)
         d.present()

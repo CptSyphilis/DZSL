@@ -6,7 +6,7 @@ import time
 from dzsl.core.config import mod_download_progress, mod_installed, mod_subscribed
 from dzsl.core.logging import get_logger
 from dzsl.runtime import is_flatpak
-from dzsl.ui.helpers import forward_steam_uri, notify_check_steam
+from dzsl.ui.helpers import forward_steam_uri
 
 log = get_logger("subscribe")
 
@@ -68,14 +68,15 @@ class SteamSubscriptionManager:
                     [sys.executable, "-m", "dzsl.steam.api", "subscribe", mid],
                     capture_output=True,
                     text=True,
-                    timeout=10,
+                    timeout=15,
                 )
-                if result.returncode == 0:
-                    return True
-                error = (result.stderr or result.stdout or "helper failed").strip().splitlines()[-1]
-                log.warning("Native Steam subscribe failed: %s", error)
+                if result.returncode != 0:
+                    error = (result.stderr or result.stdout or "helper failed").strip().splitlines()[-1]
+                    log.error("Steam subscription failed: %s", error)
+                    return False
             except (OSError, subprocess.SubprocessError) as exc:
-                log.warning("Native Steam subscribe unavailable: %s", exc)
+                log.error("Steam subscription helper failed: %s", exc)
+                return False
         return self.forward_steam_uri(f"steam://installworkshop/221100/{mid}")
 
     def sync_steam_subscriptions(self, mod_ids, start_if_needed=True):
@@ -88,7 +89,6 @@ class SteamSubscriptionManager:
             self.wait_for_steam_start(iterations=20, ready_sleep=2)
         if not self.is_steam_running():
             return
-        notify_check_steam()
         for mid in ids:
             self.subscribe_mod_steam(mid, mid)
 
@@ -97,8 +97,7 @@ class SteamSubscriptionManager:
         self.set_status(f"Waiting for {mod_name} download...")
         start = time.time()
         step = 2
-        steps = 3600 // step
-        for _ in range(steps):
+        while True:
             elapsed = int(time.time() - start)
             if progress and progress.is_cancelled():
                 log.info("Wait for %s cancelled after %ds", mod_name, elapsed)
@@ -124,8 +123,3 @@ class SteamSubscriptionManager:
                     progress.set_action_prompt(f"Steam is downloading: {mod_name}")
 
             time.sleep(step)
-
-        ok = mod_installed(self.cfg, mid)
-        if not ok:
-            log.error("Timed out waiting for %s after %ds", mod_name, int(time.time() - start))
-        return ok

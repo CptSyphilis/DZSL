@@ -268,12 +268,20 @@ class SettingsView:
 
     def _unsub_all(self):
         from dzsl.core.config import get_installed_mods
+        from dzsl.lifecycle import cancel_active_downloads
         mods = get_installed_mods(self.cfg)
         if not mods:
             self.set_status("No workshop mods found. Check Steam Library Root in Settings.")
             return
         self.set_status(f"Unsubscribing from {len(mods)} mods…")
+        root = self.panel.get_root()
+        app = root.get_application() if root else None
+        if app:
+            cancel_active_downloads(app)
         def do():
-            unsubscribe_mod_ids([m["id"] for m in mods], self.cfg)
-            GLib.idle_add(self.set_status, f"Unsubscribed from {len(mods)} mods")
+            removed, error = unsubscribe_mod_ids([m["id"] for m in mods], self.cfg)
+            if error:
+                GLib.idle_add(self.set_status, f"Steam unsubscribe failed: {error}")
+            else:
+                GLib.idle_add(self.set_status, f"Unsubscribed from {len(removed)} mods")
         threading.Thread(target=do, daemon=True).start()

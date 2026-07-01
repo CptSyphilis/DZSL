@@ -4,7 +4,6 @@ import threading
 from dzsl.core.config import mod_installed, mod_subscribed
 from dzsl.core.logging import get_logger
 from dzsl.steam.web_api import published_file_details
-from dzsl.ui.helpers import notify_check_steam
 
 log = get_logger("download")
 
@@ -45,7 +44,7 @@ class ModDownloadManager:
     ):
         self.refresh_cfg()
         names = mod_names or {}
-        ids = [str(mid) for mid in mod_ids or []]
+        ids = list(dict.fromkeys(str(mid) for mid in mod_ids or []))
         total = len(ids)
         log.info("Need %d mod(s): %s", total, ", ".join(names.get(mid, mid) for mid in ids))
 
@@ -65,8 +64,6 @@ class ModDownloadManager:
         if progress and progress.is_cancelled():
             return False, "cancelled"
 
-        notify_check_steam()
-
         n_parallel = 1
         log.info("Downloading %d mod(s) with up to %d in parallel", len(pending), n_parallel)
         if progress:
@@ -85,7 +82,14 @@ class ModDownloadManager:
             if progress:
                 progress.set_mod_status(mid, "Starting", "active")
 
-            self.subscriptions.subscribe_mod_steam(mid, mod_name)
+            if not self.subscriptions.subscribe_mod_steam(mid, mod_name):
+                err = f"Could not subscribe to {mod_name}"
+                log.error("Failed %s: %s", mod_name, err)
+                if progress:
+                    progress.set_mod_status(mid, "Subscription failed", "failed")
+                with done_lock:
+                    errors.append(err)
+                return
             ok = self.subscriptions.wait_for_mod_installed(
                 mid,
                 progress,
@@ -95,6 +99,8 @@ class ModDownloadManager:
             err = "" if ok else f"Timeout waiting for {mod_name}"
 
             if not ok:
+                if progress and progress.is_cancelled():
+                    return
                 log.error("Failed %s: %s", mod_name, err)
                 if progress:
                     progress.set_mod_status(mid, "Failed", "failed")
@@ -143,7 +149,10 @@ class ModDownloadManager:
 
     def prepare_mod_queue(self, mod_ids, mod_names=None):
         sizes = self.fetch_mod_sizes(mod_ids)
-        queue = sorted([str(mid) for mid in mod_ids or []], key=lambda mid: sizes.get(mid, 0))
+        queue = sorted(
+            dict.fromkeys(str(mid) for mid in mod_ids or []),
+            key=lambda mid: sizes.get(mid, 0),
+        )
         if queue:
             order = ", ".join(
                 f"{(mod_names or {}).get(mid, mid)} ({self.format_size(sizes.get(mid, 0))})"
