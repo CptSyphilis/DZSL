@@ -6,9 +6,9 @@ DZSL itself is a native Linux application. DayZ still runs through Steam Play/Pr
 
 Website: [dayzlinux.com](https://dayzlinux.com/)
 
-![License](https://img.shields.io/badge/license-MIT-blue)
-![Python](https://img.shields.io/badge/python-3.10+-blue)
-![Platform](https://img.shields.io/badge/platform-Linux-green)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue)](#requirements)
+[![Platform: Linux](https://img.shields.io/badge/platform-Linux-green)](#requirements)
 [![Donate with PayPal](https://img.shields.io/badge/Donate-PayPal-00457C?logo=paypal&logoColor=white)](https://www.paypal.com/donate/?hosted_button_id=R8HE5J4J4FGZY)
 
 ## Features
