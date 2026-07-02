@@ -82,6 +82,27 @@ def item_download_progress(paths, mod_id):
     return downloaded, total
 
 
+def item_staging_signature(paths, mod_id, app_id="221100"):
+    mid = str(mod_id)
+    allocated = 0
+    newest = 0
+    for manifest_path in paths:
+        staging = os.path.join(
+            os.path.dirname(manifest_path), "downloads", str(app_id), mid
+        )
+        if not os.path.isdir(staging):
+            continue
+        for root, _dirs, files in os.walk(staging):
+            for name in files:
+                try:
+                    stat = os.stat(os.path.join(root, name))
+                except OSError:
+                    continue
+                allocated += stat.st_blocks * 512
+                newest = max(newest, stat.st_mtime_ns)
+    return allocated, newest
+
+
 def folder_has_content(path):
     if not os.path.isdir(path):
         return False

@@ -3,7 +3,12 @@ import sys
 import threading
 import time
 
-from dzsl.core.config import mod_download_progress, mod_installed, mod_subscribed
+from dzsl.core.config import (
+    mod_download_progress,
+    mod_installed,
+    mod_staging_signature,
+    mod_subscribed,
+)
 from dzsl.core.logging import get_logger
 from dzsl.runtime import is_flatpak
 from dzsl.ui.helpers import forward_steam_uri
@@ -11,11 +16,13 @@ from dzsl.ui.helpers import forward_steam_uri
 log = get_logger("subscribe")
 
 
-def steam_progress_phase(bytes_done, bytes_total, stalled_seconds):
+def steam_progress_phase(bytes_done, bytes_total, stalled_seconds, staging_active=False):
     if not bytes_total:
         return "Waiting for Steam progress"
     if bytes_done >= bytes_total:
         return "Steam is installing files"
+    if staging_active and stalled_seconds >= 10:
+        return "Steam is staging (progress delayed)"
     if stalled_seconds >= 30:
         return "Steam is paused or waiting"
     return "Steam is staging download"
@@ -108,6 +115,7 @@ class SteamSubscriptionManager:
         start = time.time()
         last_bytes = 0
         last_change = start
+        last_staging = (0, 0)
         step = 2
         while True:
             now = time.time()
@@ -126,6 +134,9 @@ class SteamSubscriptionManager:
             if bytes_done != last_bytes:
                 last_bytes = bytes_done
                 last_change = now
+            staging = mod_staging_signature(self.cfg, mid)
+            staging_active = staging != last_staging and staging != (0, 0)
+            last_staging = staging
             if elapsed and elapsed % 3600 == 0 and not subscribed:
                 log.warning("No progress on %s after %ds; resending subscribe URI", mod_name, elapsed)
                 self.subscribe_mod_steam(mid, mod_name)
@@ -133,7 +144,12 @@ class SteamSubscriptionManager:
             if progress:
                 fraction = bytes_done / bytes_total if bytes_total else 0.0
                 progress.set_mod_progress(mid, fraction, bytes_done, bytes_total)
-                phase = steam_progress_phase(bytes_done, bytes_total, now - last_change)
+                phase = steam_progress_phase(
+                    bytes_done,
+                    bytes_total,
+                    now - last_change,
+                    staging_active,
+                )
                 progress.set_action_prompt(f"{phase}: {mod_name}")
 
             time.sleep(step)

@@ -2,10 +2,25 @@ import os
 import tempfile
 import unittest
 
-from dzsl.steam.workshop import validate_mod_folder
+from dzsl.steam.workshop import item_staging_signature, validate_mod_folder
 
 
 class WorkshopValidationTests(unittest.TestCase):
+    def test_staging_signature_reads_download_activity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            workshop = os.path.join(directory, "workshop")
+            manifest = os.path.join(workshop, "appworkshop_221100.acf")
+            staging = os.path.join(workshop, "downloads", "221100", "123", "Addons")
+            os.makedirs(staging)
+            payload = os.path.join(staging, "example.pbo")
+            with open(payload, "wb") as handle:
+                handle.write(b"payload")
+
+            allocated, modified = item_staging_signature([manifest], "123")
+
+            self.assertGreater(allocated, 0)
+            self.assertGreater(modified, 0)
+
     def test_nonempty_pbo_is_valid_without_optional_metadata(self):
         with tempfile.TemporaryDirectory() as directory:
             addons = os.path.join(directory, "Addons")

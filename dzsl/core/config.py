@@ -7,7 +7,13 @@ import tempfile
 from dzsl.core.constants import VERSION
 from dzsl.paths import CONFIG_DIR as CONFIG_PATH
 from dzsl.runtime import is_flatpak
-from dzsl.steam.workshop import item_download_progress, item_ready, item_record, validate_mod_folder
+from dzsl.steam.workshop import (
+    item_download_progress,
+    item_ready,
+    item_record,
+    item_staging_signature,
+    validate_mod_folder,
+)
 
 CONFIG_DIR = str(CONFIG_PATH)
 CONFIG_FILE = os.path.join(CONFIG_DIR, "config.json")
@@ -318,6 +324,10 @@ def mod_subscribed(cfg, mod_id):
 
 def mod_download_progress(cfg, mod_id):
     return item_download_progress(workshop_acf_paths(cfg), mod_id)
+
+
+def mod_staging_signature(cfg, mod_id):
+    return item_staging_signature(workshop_acf_paths(cfg), mod_id, DAYZ_APPID)
 
 WORKSHOP_LOG_CANDIDATES = [
     os.path.expanduser("~/.local/share/Steam/logs/workshop_log.txt"),

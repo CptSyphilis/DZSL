@@ -10,6 +10,10 @@ class SubscriptionTests(unittest.TestCase):
     def test_steam_progress_phase_tracks_manifest_state(self):
         self.assertEqual(steam_progress_phase(0, 0, 0), "Waiting for Steam progress")
         self.assertEqual(steam_progress_phase(10, 100, 2), "Steam is staging download")
+        self.assertEqual(
+            steam_progress_phase(10, 100, 10, staging_active=True),
+            "Steam is staging (progress delayed)",
+        )
         self.assertEqual(steam_progress_phase(10, 100, 30), "Steam is paused or waiting")
         self.assertEqual(steam_progress_phase(100, 100, 2), "Steam is installing files")
 
@@ -49,6 +53,7 @@ class SubscriptionTests(unittest.TestCase):
         with patch("dzsl.ui.subscribe.mod_subscribed", return_value=True), \
              patch("dzsl.ui.subscribe.mod_installed", return_value=False), \
              patch("dzsl.ui.subscribe.mod_download_progress", return_value=(0, 0)), \
+             patch("dzsl.ui.subscribe.mod_staging_signature", return_value=(0, 0)), \
              patch("dzsl.ui.subscribe.time.sleep"), \
              patch("dzsl.ui.subscribe.time.time", side_effect=range(0, 10000, 2)):
             self.assertFalse(manager.wait_for_mod_installed("123", progress, "Large mod"))
