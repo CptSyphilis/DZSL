@@ -18,3 +18,4 @@
 - Updates preserve the selected Steam library and existing user configuration
 - Gold listing requests include headers accepted by the public API
 - Workshop progress uses Steam's manifest totals and distinguishes waiting, staging, paused, and installing states
+- Workshop installs no longer initialize Steam as DayZ, which could pause active downloads

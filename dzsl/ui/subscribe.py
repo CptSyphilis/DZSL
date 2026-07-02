@@ -1,5 +1,4 @@
 import subprocess
-import sys
 import threading
 import time
 
@@ -79,21 +78,6 @@ class SteamSubscriptionManager:
     def subscribe_mod_steam(self, mod_id, mod_name=None):
         mid = str(mod_id)
         log.info("Subscribing through Steam: %s (%s)", mod_name or mid, mid)
-        if not is_flatpak():
-            try:
-                result = subprocess.run(
-                    [sys.executable, "-m", "dzsl.steam.api", "subscribe", mid],
-                    capture_output=True,
-                    text=True,
-                    timeout=15,
-                )
-                if result.returncode != 0:
-                    error = (result.stderr or result.stdout or "helper failed").strip().splitlines()[-1]
-                    log.error("Steam subscription failed: %s", error)
-                    return False
-            except (OSError, subprocess.SubprocessError) as exc:
-                log.error("Steam subscription helper failed: %s", exc)
-                return False
         return self.forward_steam_uri(f"steam://installworkshop/221100/{mid}")
 
     def sync_steam_subscriptions(self, mod_ids, start_if_needed=True):

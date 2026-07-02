@@ -1,4 +1,3 @@
-import subprocess
 import unittest
 from unittest.mock import Mock, patch
 
@@ -17,19 +16,16 @@ class SubscriptionTests(unittest.TestCase):
         self.assertEqual(steam_progress_phase(10, 100, 30), "Steam is paused or waiting")
         self.assertEqual(steam_progress_phase(100, 100, 2), "Steam is installing files")
 
-    def test_native_helper_subscribes_before_install_uri(self):
+    def test_install_uri_does_not_initialize_dayz_steam_api(self):
         manager = SteamSubscriptionManager(
             lambda: {}, lambda: None, lambda _message: None,
             lambda: True, lambda **_kwargs: True, lambda: None,
         )
-        result = subprocess.CompletedProcess([], 0, "", "")
-
-        with patch("dzsl.ui.subscribe.is_flatpak", return_value=False), \
-             patch("dzsl.ui.subscribe.subprocess.run", return_value=result) as run, \
+        with patch("dzsl.ui.subscribe.subprocess.run") as run, \
              patch.object(manager, "forward_steam_uri", return_value=True) as forward:
             self.assertTrue(manager.subscribe_mod_steam("123", "Example"))
 
-        self.assertIn("subscribe", run.call_args.args[0])
+        run.assert_not_called()
         forward.assert_called_once_with("steam://installworkshop/221100/123")
 
     def test_subscribe_api_does_not_request_download_while_initialized(self):
