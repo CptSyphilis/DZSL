@@ -15,7 +15,7 @@ dependencies = []
 dzsl = "dzsl.application:main"
 
 [tool.setuptools.package-data]
-dzsl = ["assets/*.png"]
+dzsl = ["assets/*.png", "assets/*.svg", "assets/fonts/*.ttf", "assets/fonts/*.txt"]
 
 [tool.setuptools.packages.find]
 include = ["dzsl*"]

@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="480" height="150" viewBox="0 0 800 250">
+  <defs>
+    <linearGradient id="galaxy" x1="0" y1="0" x2="0.85" y2="1">
+      <stop offset="0" stop-color="#e2edf2"/>
+      <stop offset="0.14" stop-color="#9fd8e0"/>
+      <stop offset="0.33" stop-color="#6aa8ff"/>
+      <stop offset="0.50" stop-color="#7c6cff"/>
+      <stop offset="0.64" stop-color="#b18cff"/>
+      <stop offset="0.78" stop-color="#d56fc4"/>
+      <stop offset="0.92" stop-color="#3a2f4a"/>
+      <stop offset="1" stop-color="#1b1826"/>
+    </linearGradient>
+  </defs>
+  <text x="400" y="194" text-anchor="middle" font-family="Oswald" font-size="220" font-weight="700" letter-spacing="10"
+        fill="url(#galaxy)" opacity="0.86">DZSL</text>
+</svg>

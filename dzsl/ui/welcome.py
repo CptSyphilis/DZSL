@@ -53,7 +53,11 @@ class WelcomeView:
         vbox.set_valign(Gtk.Align.CENTER)
         vbox.set_vexpand(True)
 
-        title = Gtk.Label(label="DZSL")
+        title = Gtk.Picture.new_for_filename(str(asset_path("dzsl-wordmark.svg")))
+        title.set_alternative_text("DZSL")
+        title.set_content_fit(Gtk.ContentFit.CONTAIN)
+        title.set_can_shrink(True)
+        title.set_size_request(360, 112)
         title.add_css_class("welcome-title")
         vbox.append(title)
 

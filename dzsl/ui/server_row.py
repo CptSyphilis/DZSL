@@ -2,6 +2,10 @@ import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Gtk, Gdk, GLib, Adw, Graphene
+import threading
+
+from dzsl.runtime import open_external_uri
+from dzsl.services.listings import fetch_banner
 from dzsl.ui.helpers import format_played, format_server_time, normalize_map_name, server_key, format_server_subtitle, server_tags
 
 def copy_text(text):
@@ -59,6 +63,9 @@ class ServerRow(Gtk.Box):
         self.on_load_mods = on_load_mods or (lambda s: None)
         self.set_status = set_status or (lambda _msg: None)
         self.expanded = False
+        self.gold_listing = server.get("_gold_listing") or {}
+        if self.gold_listing:
+            self.add_css_class("gold-server")
         # Shared single-slot list (from the parent view) tracking which row in this
         # list is currently expanded, so opening one collapses any other.
         self.expand_tracker = expand_tracker
@@ -89,6 +96,11 @@ class ServerRow(Gtk.Box):
         nl.set_halign(Gtk.Align.START)
         nl.set_ellipsize(3)
         top.append(nl)
+        if self.gold_listing:
+            gold = Gtk.Label(label="GOLD")
+            gold.add_css_class("tag")
+            gold.add_css_class("tag-gold")
+            top.append(gold)
         if pw:
             lock = Gtk.Label(label="🔒")
             lock.add_css_class("tag")
@@ -143,7 +155,10 @@ class ServerRow(Gtk.Box):
         self.main_row.append(cb)
         self.play_btn = cb
 
-        has_info = bool((server.get("description") or server.get("info") or server.get("notes") or "").strip())
+        has_info = bool(
+            (server.get("description") or server.get("info") or server.get("notes") or "").strip()
+            or any(self.gold_listing.get(key) for key in ("description", "discord", "banner"))
+        )
         info_btn = Gtk.Button(label="i")
         info_btn.add_css_class("btn-info-active" if has_info else "btn-ghost")
         info_btn.set_size_request(28, -1)
@@ -210,6 +225,9 @@ class ServerRow(Gtk.Box):
         for child in list(self.details):
             self.details.remove(child)
 
+        if self.gold_listing:
+            self._append_gold_details()
+
         be = Gtk.Label(label=f"BattlEye: {'Yes' if self.server.get('battleye', True) else 'No'}")
         be.set_halign(Gtk.Align.START)
         self.details.append(be)
@@ -235,6 +253,73 @@ class ServerRow(Gtk.Box):
         extra.set_halign(Gtk.Align.START)
         self.details.append(extra)
 
+    def _append_gold_details(self):
+        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        card.add_css_class("gold-details")
+
+        heading = Gtk.Label(label="GOLD SERVER")
+        heading.add_css_class("gold-details-title")
+        heading.set_halign(Gtk.Align.START)
+        card.append(heading)
+
+        listing_name = self.gold_listing.get("name")
+        if listing_name and listing_name != self.server.get("name"):
+            name = Gtk.Label(label=listing_name)
+            name.add_css_class("srv-name")
+            name.set_halign(Gtk.Align.START)
+            name.set_wrap(True)
+            card.append(name)
+
+        banner_url = self.gold_listing.get("banner")
+        if banner_url:
+            banner_box = Gtk.Box()
+            card.append(banner_box)
+            threading.Thread(
+                target=self._load_banner,
+                args=(banner_url, banner_box),
+                daemon=True,
+            ).start()
+
+        description = self.gold_listing.get("description")
+        if description:
+            text = Gtk.Label(label=description)
+            text.add_css_class("gold-description")
+            text.set_halign(Gtk.Align.START)
+            text.set_wrap(True)
+            text.set_max_width_chars(90)
+            card.append(text)
+
+        discord = self.gold_listing.get("discord")
+        if discord:
+            button = Gtk.Button(label="OPEN DISCORD")
+            button.add_css_class("gold-link")
+            button.set_halign(Gtk.Align.START)
+            button.connect("clicked", lambda _button: open_external_uri(discord))
+            card.append(button)
+
+        self.details.append(card)
+
+    def _load_banner(self, url, container):
+        try:
+            data = fetch_banner(url)
+        except Exception:
+            return
+        GLib.idle_add(self._show_banner, container, data)
+
+    def _show_banner(self, container, data):
+        try:
+            texture = Gdk.Texture.new_from_bytes(GLib.Bytes.new(data))
+        except Exception:
+            return False
+        picture = Gtk.Picture.new_for_paintable(texture)
+        picture.set_alternative_text("Gold server banner")
+        picture.set_content_fit(Gtk.ContentFit.COVER)
+        picture.set_can_shrink(True)
+        picture.set_size_request(520, 140)
+        picture.add_css_class("listing-banner")
+        container.append(picture)
+        return False
+
     def _show_info(self):
         popover = Gtk.Popover.new()
         popover.set_autohide(True)
@@ -245,7 +330,13 @@ class ServerRow(Gtk.Box):
         box.set_margin_start(12)
         box.set_margin_end(12)
 
-        desc = self.server.get("description") or self.server.get("info") or self.server.get("notes") or "No additional info provided by server owner."
+        desc = (
+            self.gold_listing.get("description")
+            or self.server.get("description")
+            or self.server.get("info")
+            or self.server.get("notes")
+            or "No additional info provided by server owner."
+        )
         lbl = Gtk.Label(label=desc)
         lbl.set_wrap(True)
         lbl.set_max_width_chars(60)

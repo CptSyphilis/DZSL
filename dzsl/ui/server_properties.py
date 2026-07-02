@@ -60,6 +60,7 @@ def show_server_properties(parent, server):
     tags = ", ".join(server_tags(server)) or "—"
     has_password = server.get("password") or server.get("hasPassword")
     battleye = server.get("battlEye", server.get("battleye", True))
+    gold_listing = server.get("_gold_listing") or {}
 
     win = Adw.Window()
     win.set_transient_for(parent_win)
@@ -99,6 +100,14 @@ def show_server_properties(parent, server):
         ("Version", version or "—"),
         ("Tags", tags),
     ]))
+
+    if gold_listing:
+        body.append(_section("Gold Listing", [
+            ("Listing Name", gold_listing.get("name") or server.get("name", "")),
+            ("Description", gold_listing.get("description") or "—"),
+            ("Discord", gold_listing.get("discord") or "—"),
+            ("Banner", gold_listing.get("banner") or "—"),
+        ]))
 
     body.append(_section("Security", [
         ("Password", "Yes" if has_password else "No"),

@@ -8,6 +8,7 @@ from dzsl.core.config import load_json, save_json, FILTERS_FILE
 from dzsl.core.environment import load_environment
 from dzsl.core.logging import get_logger
 from dzsl.paths import ENV_FILE
+from dzsl.services.listings import attach_featured_listings, featured_listings, pin_featured_servers
 from dzsl.services.server_api import DEFAULT_LIST_URL, fetch_servers
 from dzsl.ui.server_row import copy_text, popup_at_cursor, dismiss_popover, ServerRow
 from dzsl.ui.helpers import clear_box
@@ -65,6 +66,8 @@ class ServersView:
         self.sort_key, self.sort_rev = parse_sort_mode(self.sort_mode)
         self._ping_generation = 0
         self._fetching = False
+        self._gold_fetching = False
+        self.gold_listings = {}
         self._map_prefix = ""
         self._map_cycle_index = 0
         self._suppress_map_notify = False
@@ -238,6 +241,7 @@ class ServersView:
         if self.all_servers:
             self._update_map_filter()
             self.apply_filters()
+            self._start_gold_fetch()
         else:
             self.fetch()
 
@@ -498,7 +502,33 @@ class ServersView:
         self._fetching = True
         GLib.idle_add(self._set_refresh_enabled, False)
         self.set_status("Fetching server list...")
+        self._start_gold_fetch()
         threading.Thread(target=self._fetch_thread, daemon=True).start()
+
+    def _start_gold_fetch(self):
+        if self._gold_fetching:
+            return
+        self._gold_fetching = True
+        threading.Thread(target=self._fetch_gold_thread, daemon=True).start()
+
+    def _fetch_gold_thread(self):
+        try:
+            result = featured_listings(timeout=8)
+        except Exception as exc:
+            log.warning("Gold listings unavailable: %s", exc)
+            GLib.idle_add(self._gold_done)
+            return
+        GLib.idle_add(self._gold_done, result)
+
+    def _gold_done(self, result=None):
+        self._gold_fetching = False
+        if result is None:
+            return False
+        self.gold_listings = result
+        attach_featured_listings(self.all_servers, self.gold_listings)
+        if getattr(self, "srv_box", None):
+            self.apply_filters()
+        return False
 
     def _set_refresh_enabled(self, enabled):
         if getattr(self, "refresh_btn", None):
@@ -519,6 +549,7 @@ class ServersView:
     def _fetch_thread(self):
         try:
             self.all_servers = fetch_servers(API_URL)
+            attach_featured_listings(self.all_servers, self.gold_listings)
             _filter_state["servers"] = self.all_servers
             log.info("Fetched %d servers", len(self.all_servers))
             GLib.idle_add(self._update_version_filter)
@@ -611,6 +642,8 @@ class ServersView:
                 return (ip, port) not in fav_ips
             out.sort(key=_fav_key)
 
+        out = pin_featured_servers(out)
+
         visible = out[:500]
         clear_box(self.srv_box)
         self._expand_tracker[0] = None  # rows are being recreated, drop stale reference
@@ -627,7 +660,9 @@ class ServersView:
                     s, self.connect_cb, self.fav_cb, (ip, port) in fav_ips,
                     self.load_mods_cb, self.set_status, played_lookup=played_lookup,
                     expand_tracker=self._expand_tracker))
-        self.set_status(f"Showing {len(visible):,} of {len(self.all_servers):,} servers")
+        gold_count = sum(1 for server in visible if "_gold_listing" in server)
+        gold_status = f" · {gold_count} Gold" if gold_count else ""
+        self.set_status(f"Showing {len(visible):,} of {len(self.all_servers):,} servers{gold_status}")
         self._start_ping(visible[:80])
 
     def _start_ping(self, servers):

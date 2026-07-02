@@ -10,8 +10,14 @@ class RequestError(RuntimeError):
 
 def _json_request(url, method="GET", params=None, data=None, headers=None, timeout=30):
     parsed = urlsplit(url)
-    if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
-        raise RequestError("Only HTTPS URLs without embedded credentials are allowed")
+    local_http = parsed.scheme == "http" and parsed.hostname in ("localhost", "127.0.0.1", "::1")
+    if (
+        (parsed.scheme != "https" and not local_http)
+        or not parsed.hostname
+        or parsed.username
+        or parsed.password
+    ):
+        raise RequestError("Only HTTPS or local development URLs without embedded credentials are allowed")
     if params:
         separator = "&" if "?" in url else "?"
         url = f"{url}{separator}{urlencode(params)}"

@@ -169,3 +169,5 @@ tests/        focused regression tests
 ## License
 
 DZSL is released under the [MIT License](LICENSE).
+
+The bundled Black Ops One and Oswald fonts are distributed under the SIL Open Font License 1.1. Their license notices are included in [`dzsl/assets/fonts`](dzsl/assets/fonts/).

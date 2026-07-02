@@ -1,8 +1,11 @@
 import sys
 from dzsl.bootstrap import configure_display
+from dzsl.fonts import load_bundled_fonts
 
 if not configure_display():
     raise SystemExit(1)
+
+load_bundled_fonts()
 
 import gi
 gi.require_version('Gtk', '4.0')
@@ -19,6 +22,7 @@ from dzsl.paths import ASSETS_DIR
 from dzsl.services.connector import Connector
 from dzsl.services.server_api import fetch_server
 from dzsl.ui.add_server import AddServerView
+from dzsl.ui.branding import DZSL_WORDMARK
 from dzsl.ui.favorites import ListView
 from dzsl.ui.helpers import clear_box
 from dzsl.ui.mods import ModsView
@@ -98,7 +102,8 @@ class DZSL(Adw.Application):
         header_bar.add_css_class("app-header")
         header_bar.set_show_end_title_buttons(True)
 
-        title = Gtk.Label(label="DZSL")
+        title = Gtk.Label()
+        title.set_markup(DZSL_WORDMARK)
         title.add_css_class("app-title")
         header_bar.set_title_widget(title)
 
