@@ -3,10 +3,16 @@ import unittest
 from unittest.mock import Mock, patch
 
 from dzsl.steam.api import SteamWorkshopAPI
-from dzsl.ui.subscribe import SteamSubscriptionManager
+from dzsl.ui.subscribe import SteamSubscriptionManager, steam_progress_phase
 
 
 class SubscriptionTests(unittest.TestCase):
+    def test_steam_progress_phase_tracks_manifest_state(self):
+        self.assertEqual(steam_progress_phase(0, 0, 0), "Waiting for Steam progress")
+        self.assertEqual(steam_progress_phase(10, 100, 2), "Steam is staging download")
+        self.assertEqual(steam_progress_phase(10, 100, 30), "Steam is paused or waiting")
+        self.assertEqual(steam_progress_phase(100, 100, 2), "Steam is installing files")
+
     def test_native_helper_subscribes_before_install_uri(self):
         manager = SteamSubscriptionManager(
             lambda: {}, lambda: None, lambda _message: None,

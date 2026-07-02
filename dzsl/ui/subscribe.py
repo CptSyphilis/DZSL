@@ -11,6 +11,16 @@ from dzsl.ui.helpers import forward_steam_uri
 log = get_logger("subscribe")
 
 
+def steam_progress_phase(bytes_done, bytes_total, stalled_seconds):
+    if not bytes_total:
+        return "Waiting for Steam progress"
+    if bytes_done >= bytes_total:
+        return "Steam is installing files"
+    if stalled_seconds >= 30:
+        return "Steam is paused or waiting"
+    return "Steam is staging download"
+
+
 def launch_steam():
     if is_flatpak():
         return forward_steam_uri("steam://open/main")
@@ -96,9 +106,12 @@ class SteamSubscriptionManager:
         mid = str(mod_id)
         self.set_status(f"Waiting for {mod_name} download...")
         start = time.time()
+        last_bytes = 0
+        last_change = start
         step = 2
         while True:
-            elapsed = int(time.time() - start)
+            now = time.time()
+            elapsed = int(now - start)
             if progress and progress.is_cancelled():
                 log.info("Wait for %s cancelled after %ds", mod_name, elapsed)
                 return False
@@ -110,16 +123,17 @@ class SteamSubscriptionManager:
                 return True
 
             bytes_done, bytes_total = mod_download_progress(self.cfg, mid)
+            if bytes_done != last_bytes:
+                last_bytes = bytes_done
+                last_change = now
             if elapsed and elapsed % 3600 == 0 and not subscribed:
                 log.warning("No progress on %s after %ds; resending subscribe URI", mod_name, elapsed)
                 self.subscribe_mod_steam(mid, mod_name)
 
             if progress:
-                progress.set_action_prompt(f"Waiting for download: {mod_name}")
-                total = bytes_total or size_bytes
-                fraction = bytes_done / total if total else 0.0
-                progress.set_mod_progress(mid, fraction, bytes_done, total)
-                if bytes_total and bytes_done < bytes_total:
-                    progress.set_action_prompt(f"Steam is downloading: {mod_name}")
+                fraction = bytes_done / bytes_total if bytes_total else 0.0
+                progress.set_mod_progress(mid, fraction, bytes_done, bytes_total)
+                phase = steam_progress_phase(bytes_done, bytes_total, now - last_change)
+                progress.set_action_prompt(f"{phase}: {mod_name}")
 
             time.sleep(step)
