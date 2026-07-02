@@ -15,15 +15,15 @@ from dzsl.ui.helpers import forward_steam_uri
 log = get_logger("subscribe")
 
 
-def steam_progress_phase(bytes_done, bytes_total, stalled_seconds, staging_active=False):
+def steam_progress_phase(bytes_done, bytes_total, stalled_seconds, manifest_delayed=False):
     if not bytes_total:
         return "Waiting for Steam progress"
     if bytes_done >= bytes_total:
         return "Steam is installing files"
-    if staging_active and stalled_seconds >= 10:
-        return "Steam is staging (progress delayed)"
     if stalled_seconds >= 30:
         return "Steam is paused or waiting"
+    if manifest_delayed:
+        return "Steam is downloading (live progress in Steam)"
     return "Steam is staging download"
 
 
@@ -98,7 +98,7 @@ class SteamSubscriptionManager:
         self.set_status(f"Waiting for {mod_name} download...")
         start = time.time()
         last_bytes = 0
-        last_change = start
+        last_activity = start
         last_staging = (0, 0)
         step = 2
         while True:
@@ -117,22 +117,29 @@ class SteamSubscriptionManager:
             bytes_done, bytes_total = mod_download_progress(self.cfg, mid)
             if bytes_done != last_bytes:
                 last_bytes = bytes_done
-                last_change = now
+                last_activity = now
             staging = mod_staging_signature(self.cfg, mid)
             staging_active = staging != last_staging and staging != (0, 0)
+            if staging_active:
+                last_activity = now
             last_staging = staging
             if elapsed and elapsed % 3600 == 0 and not subscribed:
                 log.warning("No progress on %s after %ds; resending subscribe URI", mod_name, elapsed)
                 self.subscribe_mod_steam(mid, mod_name)
 
             if progress:
-                fraction = bytes_done / bytes_total if bytes_total else 0.0
-                progress.set_mod_progress(mid, fraction, bytes_done, bytes_total)
+                manifest_delayed = staging[0] > bytes_done + 16 * 1024 * 1024
+                stalled = now - last_activity
+                if manifest_delayed and stalled < 30:
+                    progress.set_mod_activity(mid)
+                else:
+                    fraction = bytes_done / bytes_total if bytes_total else 0.0
+                    progress.set_mod_progress(mid, fraction, bytes_done, bytes_total)
                 phase = steam_progress_phase(
                     bytes_done,
                     bytes_total,
-                    now - last_change,
-                    staging_active,
+                    stalled,
+                    manifest_delayed,
                 )
                 progress.set_action_prompt(f"{phase}: {mod_name}")
 

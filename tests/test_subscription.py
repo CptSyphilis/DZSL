@@ -10,10 +10,14 @@ class SubscriptionTests(unittest.TestCase):
         self.assertEqual(steam_progress_phase(0, 0, 0), "Waiting for Steam progress")
         self.assertEqual(steam_progress_phase(10, 100, 2), "Steam is staging download")
         self.assertEqual(
-            steam_progress_phase(10, 100, 10, staging_active=True),
-            "Steam is staging (progress delayed)",
+            steam_progress_phase(10, 100, 10, manifest_delayed=True),
+            "Steam is downloading (live progress in Steam)",
         )
         self.assertEqual(steam_progress_phase(10, 100, 30), "Steam is paused or waiting")
+        self.assertEqual(
+            steam_progress_phase(10, 100, 30, manifest_delayed=True),
+            "Steam is paused or waiting",
+        )
         self.assertEqual(steam_progress_phase(100, 100, 2), "Steam is installing files")
 
     def test_install_uri_does_not_initialize_dayz_steam_api(self):

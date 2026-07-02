@@ -248,6 +248,20 @@ class ModProgressDialog:
             self._update_queue_row(mid, f"{int(fraction * 100)}%", "active")
         self._run(update)
 
+    def set_mod_activity(self, mid):
+        mid = str(mid)
+        self.current_mod_name = self.names.get(mid, mid)
+        self.current_size_text = "Live progress is available in Steam"
+        def update():
+            if self._closed:
+                return
+            self.name_lbl.set_text(self.current_mod_name)
+            self.pct_lbl.set_text("ACTIVE")
+            self.bar.pulse()
+            self.size_lbl.set_text(self.current_size_text)
+            self._update_queue_row(mid, "Active", "active")
+        self._run(update)
+
     def mark_subscribed(self, mid):
         self.set_mod_status(mid, "Waiting for Steam", "active")
         self.set_hint(f"Subscribed: {self.names.get(mid, mid)}")

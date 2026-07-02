@@ -19,3 +19,4 @@
 - Gold listing requests include headers accepted by the public API
 - Workshop progress uses Steam's manifest totals and distinguishes waiting, staging, paused, and installing states
 - Workshop installs no longer initialize Steam as DayZ, which could pause active downloads
+- DZSL uses an active staging indicator instead of showing a stale percentage when Steam delays manifest updates
