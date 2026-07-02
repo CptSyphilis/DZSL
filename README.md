@@ -166,6 +166,8 @@ packaging/    Flatpak metadata and manifest
 tests/        focused regression tests
 ```
 
+Release history is recorded in [CHANGELOG.md](CHANGELOG.md). Maintainer release checks are documented in [RELEASE.md](RELEASE.md).
+
 ## License
 
 DZSL is released under the [MIT License](LICENSE).

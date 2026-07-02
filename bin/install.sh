@@ -87,7 +87,6 @@ install_deps() {
 
     if ! command -v sudo >/dev/null; then
         _err "sudo not found. Install manually:"
-        _white "  python3, python3-gi, gir1.2-gtk-4.0, gir1.2-adw-1,"
         _white "  python3, python3-gi, gir1.2-gtk-4.0, gir1.2-adw-1, gawk, curl, jq"
         exit 1
     fi
@@ -119,7 +118,6 @@ install_deps() {
             ;;
         *)
             _err "Unknown distro: $DISTRO"
-            _white "  Install manually: python3, python3-gi, gir1.2-gtk-4.0, gir1.2-adw-1,"
             _white "  python3, python3-gi, GTK4, libadwaita, gawk, curl, jq, rsync"
             ;;
     esac
@@ -216,37 +214,8 @@ write_config() {
     mkdir -p "$HOME/.config/dzsl"
     chmod 700 "$HOME/.config/dzsl"
 
-    python3 - "$CONFIG_FILE" "$STEAM_ROOT" <<'PY'
-import json, os, sys
-
-path, steam_root = sys.argv[1:3]
-defaults = {
-    "steam_root": steam_root,
-    "mods_dir": "",
-    "profile_name": "",
-    "extra_args": "",
-    "extra_mods": "",
-    "no_splash": True,
-    "no_pause": True,
-    "no_benchmark": False,
-    "window_mode": False,
-    "script_debug": False,
-    "skip_battleye": False,
-    "close_on_launch": True,
-}
-existing = {}
-if os.path.isfile(path):
-    try:
-        with open(path) as f:
-            existing = json.load(f)
-    except Exception:
-        pass
-existing.pop("launcher_path", None)
-merged = {**defaults, **existing, "steam_root": steam_root}
-with open(path, "w") as f:
-    json.dump(merged, f, indent=2)
-os.chmod(path, 0o600)
-PY
+    PYTHONPATH="$SOURCE_DIR${PYTHONPATH:+:$PYTHONPATH}" \
+        python3 -m dzsl.core.install_config "$CONFIG_FILE" "$STEAM_ROOT"
     _ok "Config written."
 }
 
