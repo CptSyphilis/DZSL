@@ -440,6 +440,8 @@ class Connector:
             if not self._ensure_steam_for_launch():
                 return
             self.set_status(f"Launching DayZ — {name}…")
+            if self.subscriptions.close_native_session():
+                time.sleep(3)
             launch_result = self._run_launcher(
                 server, mod_ids=server_mods, launch=True, password=password,
             )
@@ -560,7 +562,11 @@ class Connector:
                 self.set_status("Download cancelled.")
                 return
 
-            result = self._run_launcher(server, mod_ids=mod_ids, launch=False, password=password)
+            # mod_ids only holds the mods that needed downloading; the game
+            # must be set up and launched with the server's complete modlist.
+            server_mods, _ = self._resolve_mods(server)
+            launch_ids = server_mods or mod_ids
+            result = self._run_launcher(server, mod_ids=launch_ids, launch=False, password=password)
             still_missing = self._missing_from_output(result)
             if still_missing:
                 self.set_status("Some mods still missing — check Steam downloads.")
@@ -575,12 +581,18 @@ class Connector:
                 if not self._ensure_steam_for_launch():
                     return
                 self.set_status(f"Launching DayZ — {name}…")
+                # The native Workshop session registers DZSL with Steam as
+                # AppID 221100; Steam silently drops launch requests while it
+                # thinks DayZ is already running, so close it and let Steam
+                # notice before launching.
+                if self.subscriptions.close_native_session():
+                    time.sleep(3)
                 time.sleep(1)
                 if self._download_cancelled(progress):
                     self.set_status("Download cancelled.")
                     return
                 launch_result = self._run_launcher(
-                    server, mod_ids=mod_ids, launch=True, password=password,
+                    server, mod_ids=launch_ids, launch=True, password=password,
                 )
                 if launch_result.returncode:
                     err = self._launcher_error(launch_result)

@@ -8,10 +8,13 @@ def launch_block_reason(cfg, mod_ids, ready_check=None, installed_check=None, su
     ids = list(dict.fromkeys(str(mod_id) for mod_id in mod_ids or []))
     if not ready_check():
         return "Steam is not ready"
-    missing = [mid for mid in ids if not subscribed_check(cfg, mid)]
+    # A fully installed mod is playable even if Steam has not yet flushed the
+    # subscription record to the workshop manifest (it lags behind fresh
+    # subscribes), so only unsubscribed *and* missing mods block the launch.
+    incomplete = [mid for mid in ids if not installed_check(cfg, mid)]
+    missing = [mid for mid in incomplete if not subscribed_check(cfg, mid)]
     if missing:
         return "Required mods are not subscribed: " + ", ".join(missing)
-    incomplete = [mid for mid in ids if not installed_check(cfg, mid)]
     if incomplete:
         return "Required mods are not fully downloaded: " + ", ".join(incomplete)
     return ""

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ctypes
 import os
+import subprocess
 import sys
 import threading
 import time
@@ -179,18 +180,51 @@ class SteamWorkshopAPI:
             self._restore_app_environment()
 
 
+def run_workshop_helper(command, mod_ids=(), timeout=30):
+    """Run a native Workshop call in a short-lived subprocess.
+
+    Steam treats any process that initialises the Steamworks API for AppID
+    221100 as a running DayZ session until that process *exits* —
+    SteamAPI_Shutdown alone does not end the session, which makes Steam
+    silently drop real DayZ launch requests. Doing every native call in a
+    disposable helper keeps the main DZSL process clean.
+
+    Returns (ok, error_text).
+    """
+    cmd = [sys.executable, "-m", "dzsl.steam.api", command]
+    cmd.extend(str(mid) for mid in mod_ids)
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return False, str(exc)
+    return proc.returncode == 0, (proc.stderr or "").strip()
+
+
 def _workshop_command(command, mod_ids):
     api = SteamWorkshopAPI()
     try:
+        if command == "suspend":
+            if not api.suspend_downloads(True):
+                if api.error:
+                    print(api.error, file=sys.stderr)
+                return 1
         for mod_id in mod_ids:
+            if not mod_id.isdigit():
+                return 1
             if command == "subscribe":
-                ok = mod_id.isdigit() and api.subscribe(mod_id)
+                ok = api.subscribe(mod_id)
+            elif command == "download":
+                ok = api.queue_download(mod_id, subscribe=True)
+            elif command == "unsubscribe":
+                ok = api.unsubscribe(mod_id)
             else:
-                ok = mod_id.isdigit() and api.unsubscribe(mod_id)
+                return 2
             if not ok:
                 if api.error:
                     print(api.error, file=sys.stderr)
                 return 1
+        if not api.lib:
+            return 0
         deadline = time.monotonic() + 0.75
         while time.monotonic() < deadline:
             api.lib.SteamAPI_RunCallbacks()
@@ -201,7 +235,15 @@ def _workshop_command(command, mod_ids):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 3 or sys.argv[1] not in {"subscribe", "unsubscribe"}:
-        print("usage: steam_api.py subscribe|unsubscribe MOD_ID [MOD_ID ...]", file=sys.stderr)
+    _commands = {"subscribe", "unsubscribe", "download", "suspend"}
+    if (
+        len(sys.argv) < 2
+        or sys.argv[1] not in _commands
+        or (sys.argv[1] != "suspend" and len(sys.argv) < 3)
+    ):
+        print(
+            "usage: steam_api.py subscribe|unsubscribe|download MOD_ID [MOD_ID ...] | suspend",
+            file=sys.stderr,
+        )
         raise SystemExit(2)
     raise SystemExit(_workshop_command(sys.argv[1], sys.argv[2:]))

@@ -10,7 +10,7 @@ from dzsl.core.config import (
 )
 from dzsl.core.logging import get_logger
 from dzsl.runtime import is_flatpak
-from dzsl.steam.api import SteamWorkshopAPI
+from dzsl.steam.api import run_workshop_helper
 from dzsl.ui.helpers import forward_steam_uri
 
 log = get_logger("subscribe")
@@ -82,8 +82,6 @@ class SteamSubscriptionManager:
         self.is_steam_running = is_steam_running
         self.wait_for_steam_start = wait_for_steam_start
         self.launch_steam = launch_steam
-        self._native_api = None
-        self._native_lock = threading.RLock()
 
     @property
     def cfg(self):
@@ -103,50 +101,39 @@ class SteamSubscriptionManager:
         return self._queue_native(mid, mod_name)
 
     def _queue_native(self, mod_id, mod_name=None):
-        api = self._native_session()
-        if not api:
-            return False
-        needs_subscription = not mod_subscribed(self.cfg, mod_id)
-        if not api.queue_download(mod_id, subscribe=needs_subscription):
+        # Native Workshop calls run in a disposable subprocess: a process that
+        # initialises Steamworks for AppID 221100 counts as "playing DayZ"
+        # until it exits, and Steam drops DayZ launch requests while it does.
+        ok, error = run_workshop_helper("download", [mod_id])
+        if not ok:
             log.error(
                 "Steamworks queue failed for %s: %s",
                 mod_name or mod_id,
-                api.error or "Steam rejected the request",
+                error or "Steam rejected the request",
             )
             return False
         return True
 
-    def _native_session(self):
-        with self._native_lock:
-            if self._native_api:
-                return self._native_api
-            api = SteamWorkshopAPI()
-            if not api.initialize():
-                log.error("Steamworks is unavailable: %s", api.error)
-                api.close()
-                return None
-            self._native_api = api
-            return api
-
     def close_native_session(self):
-        with self._native_lock:
-            if self._native_api:
-                self._native_api.close()
-                self._native_api = None
+        # Native sessions live in short-lived helper subprocesses now, so the
+        # main process never holds one. Kept for the connector's pre-launch
+        # safety call.
+        return False
 
     def suspend_downloads(self):
         if is_flatpak():
             return False
-        api = self._native_session()
-        return bool(api and api.suspend_downloads(True))
+        ok, error = run_workshop_helper("suspend")
+        if not ok and error:
+            log.error("Could not suspend Workshop downloads: %s", error)
+        return ok
 
     def steam_item_status(self, mod_id):
-        if is_flatpak():
-            return 0, (0, 0)
-        api = self._native_session()
-        if not api:
-            return 0, (0, 0)
-        return api.item_state(mod_id), api.download_info(mod_id)
+        # Progress and state come from Steam's workshop ACF manifests
+        # (mod_download_progress / mod_staging_signature); querying the live
+        # item state would need an in-process Steamworks session, which would
+        # mark DZSL as a running DayZ instance.
+        return 0, (0, 0)
 
     def sync_steam_subscriptions(self, mod_ids, start_if_needed=True):
         ids = [str(mid) for mid in mod_ids or []]

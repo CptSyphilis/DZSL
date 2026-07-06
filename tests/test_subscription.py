@@ -24,20 +24,16 @@ class SubscriptionTests(unittest.TestCase):
             "Steam is paused in Steam",
         )
 
-    def test_existing_subscription_uses_native_steamworks_queue(self):
+    def test_subscription_uses_helper_subprocess(self):
         manager = SteamSubscriptionManager(
             lambda: {}, lambda: None, lambda _message: None,
             lambda: True, lambda **_kwargs: True, lambda: None,
         )
-        native_api = Mock()
-        native_api.queue_download.return_value = True
-        with patch("dzsl.ui.subscribe.mod_subscribed", return_value=True), \
-             patch.object(manager, "_native_session", return_value=native_api) as session, \
+        with patch("dzsl.ui.subscribe.run_workshop_helper", return_value=(True, "")) as helper, \
              patch.object(manager, "forward_steam_uri", return_value=True) as forward:
             self.assertTrue(manager.subscribe_mod_steam("123", "Example"))
 
-        session.assert_called_once_with()
-        native_api.queue_download.assert_called_once_with("123", subscribe=False)
+        helper.assert_called_once_with("download", ["123"])
         forward.assert_not_called()
 
     def test_subscribe_api_queues_download_after_subscribe(self):
@@ -53,20 +49,16 @@ class SubscriptionTests(unittest.TestCase):
         api.lib.SteamAPI_ISteamUGC_SuspendDownloads.assert_called_once_with(api.ugc, False)
         api.lib.SteamAPI_ISteamUGC_DownloadItem.assert_called_once_with(api.ugc, 123, True)
 
-    def test_missing_subscription_uses_native_steamworks_queue(self):
+    def test_failed_helper_subprocess_reports_failure(self):
         manager = SteamSubscriptionManager(
             lambda: {}, lambda: None, lambda _message: None,
             lambda: True, lambda **_kwargs: True, lambda: None,
         )
-        native_api = Mock()
-        native_api.queue_download.return_value = True
-        with patch("dzsl.ui.subscribe.mod_subscribed", return_value=False), \
-             patch.object(manager, "_native_session", return_value=native_api) as session, \
+        with patch("dzsl.ui.subscribe.run_workshop_helper", return_value=(False, "Steam rejected the request")) as helper, \
              patch.object(manager, "forward_steam_uri", return_value=True) as forward:
-            self.assertTrue(manager.subscribe_mod_steam("123", "Example"))
+            self.assertFalse(manager.subscribe_mod_steam("123", "Example"))
 
-        session.assert_called_once_with()
-        native_api.queue_download.assert_called_once_with("123", subscribe=True)
+        helper.assert_called_once_with("download", ["123"])
         forward.assert_not_called()
 
     def test_suspend_downloads_calls_steamworks_pause(self):
