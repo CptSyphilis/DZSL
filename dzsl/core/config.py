@@ -329,22 +329,6 @@ def mod_download_progress(cfg, mod_id):
 def mod_staging_signature(cfg, mod_id):
     return item_staging_signature(workshop_acf_paths(cfg), mod_id, DAYZ_APPID)
 
-WORKSHOP_LOG_CANDIDATES = [
-    os.path.expanduser("~/.local/share/Steam/logs/workshop_log.txt"),
-    os.path.expanduser("~/.steam/steam/logs/workshop_log.txt"),
-    os.path.expanduser("~/.var/app/com.valvesoftware.Steam/data/Steam/logs/workshop_log.txt"),
-]
-
-def mod_subscribed_per_steam_log(mod_id):
-    needle = f"Subscribed to item {mod_id}"
-    for path in WORKSHOP_LOG_CANDIDATES:
-        try:
-            if needle in open(path, errors="ignore").read():
-                return True
-        except OSError:
-            continue
-    return False
-
 def mod_installed(cfg, mod_id):
     mid = str(mod_id)
     manifests = workshop_acf_paths(cfg)
