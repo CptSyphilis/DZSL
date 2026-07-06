@@ -22,6 +22,14 @@ class ModDownloadManager:
     def download_cancelled(self, progress):
         return progress and progress.is_cancelled()
 
+    def stop_active_downloads(self):
+        def worker():
+            if self.subscriptions.suspend_downloads():
+                self.set_status("Steam Workshop download paused.")
+            else:
+                self.set_status("Could not pause the Steam Workshop download.")
+        threading.Thread(target=worker, daemon=True).start()
+
     def count_installed_mods(self, mod_ids):
         return sum(1 for mid in mod_ids if mod_installed(self.cfg, mid))
 

@@ -351,6 +351,7 @@ class Connector:
         progress = ModProgressDialog(
             queue,
             mod_names or {},
+            on_cancel=self.downloads.stop_active_downloads,
             on_open_downloads=self._open_steam_downloads,
         )
         self.set_downloading(True, progress)
@@ -593,6 +594,7 @@ class Connector:
             else:
                 self.set_status(f"Mods loaded for {name}")
         finally:
+            self.subscriptions.close_native_session()
             self._busy = False
             self._finish_workshop_operation()
             if progress:

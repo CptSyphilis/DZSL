@@ -39,6 +39,7 @@ my_env/
 *.swp
 *.swo
 *~
+notes.md
 
 # OS
 .DS_Store
@@ -76,11 +77,13 @@ AGENTS.md
 assets/dzsl-bg.svg
 assets/AGENTS.md
 assets/build_bg.py
+
+# Internal/WIP tests not ready for the public repo
 tests/test_launch_gate.py
 tests/test_lifecycle.py
 tests/test_steam_download_state.py
 tests/test_steam_readiness.py
-.gitignore
-tests/test_steam_download_state.py
-tests/test_steam_readiness.py
-tests/test_lifecycle.py
+
+# Session/AI working docs — never belong in the public repo
+SESSION_NOTES.md
+bug report.md

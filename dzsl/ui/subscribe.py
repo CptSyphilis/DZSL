@@ -10,12 +10,30 @@ from dzsl.core.config import (
 )
 from dzsl.core.logging import get_logger
 from dzsl.runtime import is_flatpak
+from dzsl.steam.api import SteamWorkshopAPI
 from dzsl.ui.helpers import forward_steam_uri
 
 log = get_logger("subscribe")
 
+STEAM_ITEM_SUBSCRIBED = 1
+STEAM_ITEM_LEGACY = 2
+STEAM_ITEM_INSTALLED = 4
+STEAM_ITEM_NEEDS_UPDATE = 8
+STEAM_ITEM_DOWNLOADING = 16
+STEAM_ITEM_DOWNLOAD_PENDING = 32
 
-def steam_progress_phase(bytes_done, bytes_total, stalled_seconds, manifest_delayed=False):
+
+def steam_progress_phase(
+    bytes_done,
+    bytes_total,
+    stalled_seconds,
+    manifest_delayed=False,
+    steam_state=0,
+):
+    if steam_state & (STEAM_ITEM_NEEDS_UPDATE | STEAM_ITEM_DOWNLOAD_PENDING):
+        if steam_state & STEAM_ITEM_DOWNLOADING:
+            return "Steam is staging download"
+        return "Steam is paused in Steam"
     if not bytes_total:
         return "Waiting for Steam progress"
     if bytes_done >= bytes_total:
@@ -64,6 +82,8 @@ class SteamSubscriptionManager:
         self.is_steam_running = is_steam_running
         self.wait_for_steam_start = wait_for_steam_start
         self.launch_steam = launch_steam
+        self._native_api = None
+        self._native_lock = threading.RLock()
 
     @property
     def cfg(self):
@@ -77,8 +97,56 @@ class SteamSubscriptionManager:
 
     def subscribe_mod_steam(self, mod_id, mod_name=None):
         mid = str(mod_id)
-        log.info("Subscribing through Steam: %s (%s)", mod_name or mid, mid)
-        return self.forward_steam_uri(f"steam://installworkshop/221100/{mid}")
+        log.info("Queueing through Steam: %s (%s)", mod_name or mid, mid)
+        if is_flatpak():
+            return self.forward_steam_uri(f"steam://installworkshop/221100/{mid}")
+        return self._queue_native(mid, mod_name)
+
+    def _queue_native(self, mod_id, mod_name=None):
+        api = self._native_session()
+        if not api:
+            return False
+        needs_subscription = not mod_subscribed(self.cfg, mod_id)
+        if not api.queue_download(mod_id, subscribe=needs_subscription):
+            log.error(
+                "Steamworks queue failed for %s: %s",
+                mod_name or mod_id,
+                api.error or "Steam rejected the request",
+            )
+            return False
+        return True
+
+    def _native_session(self):
+        with self._native_lock:
+            if self._native_api:
+                return self._native_api
+            api = SteamWorkshopAPI()
+            if not api.initialize():
+                log.error("Steamworks is unavailable: %s", api.error)
+                api.close()
+                return None
+            self._native_api = api
+            return api
+
+    def close_native_session(self):
+        with self._native_lock:
+            if self._native_api:
+                self._native_api.close()
+                self._native_api = None
+
+    def suspend_downloads(self):
+        if is_flatpak():
+            return False
+        api = self._native_session()
+        return bool(api and api.suspend_downloads(True))
+
+    def steam_item_status(self, mod_id):
+        if is_flatpak():
+            return 0, (0, 0)
+        api = self._native_session()
+        if not api:
+            return 0, (0, 0)
+        return api.item_state(mod_id), api.download_info(mod_id)
 
     def sync_steam_subscriptions(self, mod_ids, start_if_needed=True):
         ids = [str(mid) for mid in mod_ids or []]
@@ -100,6 +168,7 @@ class SteamSubscriptionManager:
         last_bytes = 0
         last_activity = start
         last_staging = (0, 0)
+        next_subscribe_retry = 15
         step = 2
         while True:
             now = time.time()
@@ -114,7 +183,13 @@ class SteamSubscriptionManager:
                 log.info("%s installed and current after %ds", mod_name, elapsed)
                 return True
 
+            steam_state, steam_progress = self.steam_item_status(mid)
+            steam_bytes_done, steam_bytes_total = steam_progress
             bytes_done, bytes_total = mod_download_progress(self.cfg, mid)
+            if steam_bytes_total:
+                bytes_done, bytes_total = steam_progress
+            elif steam_bytes_done and not bytes_done:
+                bytes_done = steam_bytes_done
             if bytes_done != last_bytes:
                 last_bytes = bytes_done
                 last_activity = now
@@ -123,11 +198,19 @@ class SteamSubscriptionManager:
             if staging_active:
                 last_activity = now
             last_staging = staging
-            if elapsed and elapsed % 3600 == 0 and not subscribed:
-                log.warning("No progress on %s after %ds; resending subscribe URI", mod_name, elapsed)
+            if elapsed >= next_subscribe_retry and not subscribed and not bytes_total and staging == (0, 0):
+                log.warning("Steam still has not queued %s after %ds; retrying", mod_name, elapsed)
                 self.subscribe_mod_steam(mid, mod_name)
+                next_subscribe_retry += 30
 
             if progress:
+                steam_downloading = bool(steam_state & STEAM_ITEM_DOWNLOADING)
+                steam_paused = bool(steam_state & (STEAM_ITEM_NEEDS_UPDATE | STEAM_ITEM_DOWNLOAD_PENDING))
+                if steam_paused and not steam_downloading:
+                    progress.set_mod_status(mid, "Paused in Steam", "active")
+                    progress.set_action_prompt(f"Paused in Steam: {mod_name}")
+                    time.sleep(step)
+                    continue
                 manifest_delayed = staging[0] > bytes_done + 16 * 1024 * 1024
                 stalled = now - last_activity
                 if manifest_delayed and stalled < 30:
@@ -140,6 +223,7 @@ class SteamSubscriptionManager:
                     bytes_total,
                     stalled,
                     manifest_delayed,
+                    steam_state=steam_state,
                 )
                 progress.set_action_prompt(f"{phase}: {mod_name}")
 

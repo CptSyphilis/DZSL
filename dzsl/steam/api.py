@@ -94,6 +94,17 @@ class SteamWorkshopAPI:
         lib.SteamAPI_ISteamUGC_SubscribeItem.restype = ctypes.c_uint64
         lib.SteamAPI_ISteamUGC_DownloadItem.argtypes = [ctypes.c_void_p, ctypes.c_uint64, ctypes.c_bool]
         lib.SteamAPI_ISteamUGC_DownloadItem.restype = ctypes.c_bool
+        lib.SteamAPI_ISteamUGC_SuspendDownloads.argtypes = [ctypes.c_void_p, ctypes.c_bool]
+        lib.SteamAPI_ISteamUGC_SuspendDownloads.restype = None
+        lib.SteamAPI_ISteamUGC_GetItemState.argtypes = [ctypes.c_void_p, ctypes.c_uint64]
+        lib.SteamAPI_ISteamUGC_GetItemState.restype = ctypes.c_uint32
+        lib.SteamAPI_ISteamUGC_GetItemDownloadInfo.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_uint64,
+            ctypes.POINTER(ctypes.c_uint64),
+            ctypes.POINTER(ctypes.c_uint64),
+        ]
+        lib.SteamAPI_ISteamUGC_GetItemDownloadInfo.restype = ctypes.c_bool
         lib.SteamAPI_ISteamUGC_UnsubscribeItem.argtypes = [ctypes.c_void_p, ctypes.c_uint64]
         lib.SteamAPI_ISteamUGC_UnsubscribeItem.restype = ctypes.c_uint64
 
@@ -104,6 +115,52 @@ class SteamWorkshopAPI:
             call = self.lib.SteamAPI_ISteamUGC_SubscribeItem(self.ugc, int(mod_id))
             self.lib.SteamAPI_RunCallbacks()
             return bool(call)
+
+    def queue_download(self, mod_id, subscribe=False):
+        with self.lock:
+            if not self.initialize():
+                return False
+            subscribed = True
+            if subscribe:
+                subscribed = bool(
+                    self.lib.SteamAPI_ISteamUGC_SubscribeItem(self.ugc, int(mod_id))
+                )
+                self.lib.SteamAPI_RunCallbacks()
+            self.lib.SteamAPI_ISteamUGC_SuspendDownloads(self.ugc, False)
+            queued = self.lib.SteamAPI_ISteamUGC_DownloadItem(
+                self.ugc, int(mod_id), True
+            )
+            self.lib.SteamAPI_RunCallbacks()
+            return subscribed and bool(queued)
+
+    def suspend_downloads(self, suspend=True):
+        with self.lock:
+            if not self.initialize():
+                return False
+            self.lib.SteamAPI_ISteamUGC_SuspendDownloads(self.ugc, bool(suspend))
+            self.lib.SteamAPI_RunCallbacks()
+            return True
+
+    def item_state(self, mod_id):
+        with self.lock:
+            if not self.initialize():
+                return 0
+            self.lib.SteamAPI_RunCallbacks()
+            return int(self.lib.SteamAPI_ISteamUGC_GetItemState(self.ugc, int(mod_id)))
+
+    def download_info(self, mod_id):
+        with self.lock:
+            if not self.initialize():
+                return 0, 0
+            downloaded = ctypes.c_uint64()
+            total = ctypes.c_uint64()
+            ok = self.lib.SteamAPI_ISteamUGC_GetItemDownloadInfo(
+                self.ugc,
+                int(mod_id),
+                ctypes.byref(downloaded),
+                ctypes.byref(total),
+            )
+            return (int(downloaded.value), int(total.value)) if ok else (0, 0)
 
     def unsubscribe(self, mod_id):
         with self.lock:

@@ -13,7 +13,7 @@ gi.require_version('Adw', '1')
 from gi.repository import Gtk, Adw, GLib, Gdk, Gio
 import threading, subprocess, time
 
-from dzsl.core.config import load_cfg, save_cfg, save_json, load_json, FAVS_FILE, RECENT_FILE, is_steam_ready, VERSION
+from dzsl.core.config import load_cfg, save_cfg, save_json, load_json, FAVS_FILE, RECENT_FILE, VERSION
 from dzsl.core.constants import APPLICATION_ID
 from dzsl.core.logging import setup_logging, get_logger
 from dzsl.core.uri import parse_connect_uri
@@ -21,6 +21,7 @@ from dzsl.lifecycle import cancel_active_downloads
 from dzsl.paths import ASSETS_DIR
 from dzsl.services.connector import Connector
 from dzsl.services.server_api import fetch_server
+from dzsl.steam.login import steam_login_account
 from dzsl.ui.add_server import AddServerView
 from dzsl.ui.branding import DZSL_WORDMARK
 from dzsl.ui.favorites import ListView
@@ -48,6 +49,7 @@ class DZSL(Adw.Application):
         self.current_view = "welcome"
         self._pending_connect = None
         self._steam_ready = False
+        self._steam_account = None
 
     def on_command_line(self, _app, command_line):
         for raw_arg in command_line.get_arguments()[1:]:
@@ -217,68 +219,81 @@ class DZSL(Adw.Application):
     def _idle_statuses(self):
         return {"Ready", "Ready — start Steam to launch DayZ"}
 
-    def _check_steam_running_async(self, callback):
+    def _check_steam_login_async(self, callback):
         def worker():
-            ready = is_steam_ready()
-            GLib.idle_add(callback, ready)
+            account = steam_login_account()
+            GLib.idle_add(callback, account)
         threading.Thread(target=worker, daemon=True).start()
 
     def _update_steam_status(self):
-        self._check_steam_running_async(
+        self._check_steam_login_async(
             self._on_steam_status
         )
 
-    def _on_steam_status(self, ready):
-        if ready:
+    def _on_steam_status(self, account):
+        if account:
             self._steam_ready = True
-            self.set_status("Ready")
+            self._steam_account = account
+            self.set_status(f"Signed in to Steam as {account.display_name}")
             return
         self._steam_ready = False
-        self.set_status("Steam is not ready. Browsing remains available; connecting will start Steam.")
+        self._steam_account = None
+        self._set_navigation_enabled(False)
+        self._show_steam_wait_screen()
+        self.set_status("Sign in to Steam to use DZSL.")
         if not getattr(self, "_recheck_source", None):
             launch_steam()
             self._recheck_source = GLib.timeout_add_seconds(2, self._recheck_tick)
 
     def _poll_steam_status(self):
         current = self.status_lbl.get_text()
-        if current in self._idle_statuses():
+        if current in self._idle_statuses() or current.startswith("Signed in to Steam as "):
             self._update_steam_status()
         return True
 
     def _start_steam_enforcement(self):
-        self._check_steam_running_async(self._on_initial_steam_check)
+        self._set_navigation_enabled(False)
+        self._check_steam_login_async(self._on_initial_steam_check)
 
-    def _on_initial_steam_check(self, ready):
-        if ready:
-            self._steam_ready = True
-            self.set_status("Ready")
-            self.show_view(self.current_view)
-            self._dispatch_pending_connect()
-            GLib.timeout_add_seconds(5, self._poll_steam_status)
+    def _on_initial_steam_check(self, account):
+        if account:
+            self._finish_steam_login(account)
             return
 
-        self.set_status("Steam is required to use DZSL. Starting Steam...")
+        self.set_status("Sign in to Steam to use DZSL.")
         launch_steam()
         self._show_steam_wait_screen()
         self._recheck_source = GLib.timeout_add_seconds(2, self._recheck_tick)
 
     def _recheck_tick(self):
-        self._check_steam_running_async(self._on_recheck_result)
+        self._check_steam_login_async(self._on_recheck_result)
         return True
 
-    def _on_recheck_result(self, ready):
-        if ready:
-            self._steam_ready = True
-            self.set_status("Ready")
-            self._hide_steam_wait_screen()
-            self.show_view(self.current_view)
-            self._dispatch_pending_connect()
-            if getattr(self, "_recheck_source", None):
-                GLib.source_remove(self._recheck_source)
-                self._recheck_source = None
-            GLib.timeout_add_seconds(5, self._poll_steam_status)
+    def _on_recheck_result(self, account):
+        if account:
+            self._finish_steam_login(account)
         else:
-            self.set_status("Waiting for Steam to start...")
+            self.set_status("Waiting for Steam sign-in...")
+
+    def _finish_steam_login(self, account):
+        self._steam_ready = True
+        self._steam_account = account
+        self.set_status(f"Signed in to Steam as {account.display_name}")
+        self._set_navigation_enabled(True)
+        self._hide_steam_wait_screen()
+        self.show_view(self.current_view)
+        self._dispatch_pending_connect()
+        if getattr(self, "_recheck_source", None):
+            GLib.source_remove(self._recheck_source)
+            self._recheck_source = None
+        if not getattr(self, "_steam_poll_source", None):
+            self._steam_poll_source = GLib.timeout_add_seconds(5, self._poll_steam_status)
+
+    def _set_navigation_enabled(self, enabled):
+        for button in getattr(self, "header_btns", {}).values():
+            button.set_sensitive(enabled)
+        if getattr(self, "back_btn", None):
+            self.back_btn.set_sensitive(enabled)
 
     def _show_steam_wait_screen(self):
         self.clear_panel()
@@ -288,14 +303,14 @@ class DZSL(Adw.Application):
         vbox.set_margin_top(80)
         vbox.set_margin_bottom(80)
 
-        title = Gtk.Label(label="Steam Required")
+        title = Gtk.Label(label="Sign in to Steam")
         title.add_css_class("app-title")
         vbox.append(title)
 
         msg = Gtk.Label(
-            label="DZSL cannot be used unless Steam is running.\n"
-                  "Steam has been launched automatically.\n"
-                  "Please wait for Steam to start, or start it manually."
+            label="DZSL requires an active Steam account.\n"
+                  "Sign in through the Steam client, then return here.\n"
+                  "The launcher will unlock automatically."
         )
         msg.add_css_class("empty")
         msg.set_justify(Gtk.Justification.CENTER)
@@ -319,18 +334,15 @@ class DZSL(Adw.Application):
         self.clear_panel()
 
     def _manual_steam_check(self):
-        if is_steam_ready():
-            self._steam_ready = True
-            self.set_status("Ready")
-            self._hide_steam_wait_screen()
-            self.show_view(self.current_view)
-            self._dispatch_pending_connect()
-            if getattr(self, "_recheck_source", None):
-                GLib.source_remove(self._recheck_source)
-                self._recheck_source = None
-        else:
-            self.set_status("Steam still not detected — launching...")
-            launch_steam()
+        self.set_status("Checking Steam sign-in...")
+        self._check_steam_login_async(self._on_manual_steam_check)
+
+    def _on_manual_steam_check(self, account):
+        if account:
+            self._finish_steam_login(account)
+            return
+        self.set_status("Steam is not signed in yet.")
+        launch_steam()
 
     def _dispatch_pending_connect(self):
         if not self._pending_connect or not getattr(self, "_steam_ready", False):
