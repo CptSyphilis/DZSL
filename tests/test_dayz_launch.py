@@ -1,8 +1,17 @@
+import os
+import shutil
+import tempfile
 import unittest
 from unittest.mock import patch
 from urllib.parse import unquote
 
-from dzsl.services.dayz import build_launch_command, build_launch_uri
+from dzsl.services.dayz import (
+    ModSetupError,
+    build_launch_command,
+    build_launch_uri,
+    mod_link_name,
+    setup_mod_links,
+)
 
 
 class DayZLaunchTests(unittest.TestCase):
@@ -40,6 +49,68 @@ class DayZLaunchTests(unittest.TestCase):
             "-nolauncher", "-world=empty", "-name=Survivor Name",
             "-password=secret value", "-nosplash", "-noPause",
         ])
+
+
+class ModLinkGuardTests(unittest.TestCase):
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.root)
+        self.game_dir = os.path.join(self.root, "game")
+        self.workshop = os.path.join(self.root, "workshop")
+        os.makedirs(self.game_dir)
+        os.makedirs(self.workshop)
+        self.cfg = {"steam_root": self.root, "mods_dir": self.workshop}
+
+    def make_mod(self, mod_id, pbo_bytes=b"payload"):
+        addons = os.path.join(self.workshop, str(mod_id), "addons")
+        os.makedirs(addons)
+        with open(os.path.join(addons, "core.pbo"), "wb") as fh:
+            fh.write(pbo_bytes)
+
+    def run_setup(self, mod_ids):
+        with patch("dzsl.services.dayz.dayz_dir", return_value=self.game_dir):
+            return setup_mod_links(self.cfg, mod_ids)
+
+    def test_valid_mod_gets_resolvable_link(self):
+        self.make_mod(123)
+        links = self.run_setup(["123"])
+        self.assertEqual(links, [mod_link_name("123")])
+        link_path = os.path.join(self.game_dir, links[0])
+        self.assertTrue(os.path.islink(link_path))
+        self.assertTrue(os.path.isfile(os.path.join(link_path, "addons", "core.pbo")))
+
+    def test_link_not_reaching_content_is_refused(self):
+        self.make_mod(123)
+        source = os.path.join(self.workshop, "123")
+
+        def by_path(path):
+            return (True, "") if path == source else (False, "no PBO payload files were found")
+
+        with patch("dzsl.services.dayz.validate_mod_folder", side_effect=by_path):
+            with self.assertRaisesRegex(ModSetupError, "does not reach usable mod content"):
+                self.run_setup(["123"])
+
+    def test_stale_link_is_repointed_and_validated(self):
+        self.make_mod(123)
+        link_path = os.path.join(self.game_dir, mod_link_name("123"))
+        os.symlink("../nowhere", link_path)
+        links = self.run_setup(["123"])
+        self.assertEqual(links, [mod_link_name("123")])
+        self.assertTrue(os.path.isfile(os.path.join(link_path, "addons", "core.pbo")))
+
+    def test_missing_mod_points_at_custom_folder_setting(self):
+        steam_content = os.path.join(
+            self.root, "steamapps", "workshop", "content", "221100", "123", "addons"
+        )
+        os.makedirs(steam_content)
+        with open(os.path.join(steam_content, "core.pbo"), "wb") as fh:
+            fh.write(b"payload")
+        with self.assertRaisesRegex(ModSetupError, "Custom Mods Folder"):
+            self.run_setup(["123"])
+
+    def test_missing_mod_without_steam_copy_keeps_plain_error(self):
+        with self.assertRaisesRegex(ModSetupError, "^Missing Workshop mod 123$"):
+            self.run_setup(["123"])
 
 
 if __name__ == "__main__":

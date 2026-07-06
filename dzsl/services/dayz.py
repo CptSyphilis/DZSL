@@ -37,6 +37,22 @@ def _find_mod_dir(cfg, mod_id):
     return ""
 
 
+def _missing_mod_error(cfg, mod_id):
+    # A custom mods folder overrides auto-detection entirely, so a mod that
+    # Steam downloaded into its own library becomes invisible to DZSL. Point
+    # at the setting instead of reporting the mod as missing outright.
+    custom = cfg.get("mods_dir")
+    if custom:
+        for root in workshop_dirs({**cfg, "mods_dir": ""}):
+            if validate_mod_folder(os.path.join(root, str(mod_id)))[0]:
+                return (
+                    f"Workshop mod {mod_id} is not in the custom mods folder "
+                    f"({custom}) but Steam has it in {root} — fix or clear "
+                    "'Custom Mods Folder' in Settings"
+                )
+    return f"Missing Workshop mod {mod_id}"
+
+
 def setup_mod_links(cfg, mod_ids):
     """Validate Workshop mods and ensure DayZ-relative symlinks exist."""
     game_dir = dayz_dir(cfg)
@@ -52,7 +68,7 @@ def setup_mod_links(cfg, mod_ids):
         seen.add(mid)
         source = _find_mod_dir(cfg, mid)
         if not source:
-            raise ModSetupError(f"Missing Workshop mod {mid}")
+            raise ModSetupError(_missing_mod_error(cfg, mid))
         valid, reason = validate_mod_folder(source)
         if not valid:
             raise ModSetupError(f"Invalid Workshop mod {mid}: {reason}")
@@ -61,13 +77,22 @@ def setup_mod_links(cfg, mod_ids):
         link_path = os.path.join(game_dir, link_name)
         relative_source = os.path.relpath(source, game_dir)
         if os.path.lexists(link_path):
-            if os.path.islink(link_path) and os.readlink(link_path) == relative_source:
-                links.append(link_name)
-                continue
-            if os.path.isdir(link_path) and not os.path.islink(link_path):
-                raise ModSetupError(f"Cannot replace real directory: {link_path}")
-            os.unlink(link_path)
-        os.symlink(relative_source, link_path)
+            if not (os.path.islink(link_path) and os.readlink(link_path) == relative_source):
+                if os.path.isdir(link_path) and not os.path.islink(link_path):
+                    raise ModSetupError(f"Cannot replace real directory: {link_path}")
+                os.unlink(link_path)
+                os.symlink(relative_source, link_path)
+        else:
+            os.symlink(relative_source, link_path)
+
+        # DayZ silently ignores -mod entries whose link does not reach real
+        # PBO content, which ends in a server kick instead of an error here.
+        valid, reason = validate_mod_folder(link_path)
+        if not valid:
+            raise ModSetupError(
+                f"Mod link {link_name} for {mid} does not reach usable mod "
+                f"content ({reason}): {link_path} -> {os.path.realpath(link_path)}"
+            )
         links.append(link_name)
     return links
 
