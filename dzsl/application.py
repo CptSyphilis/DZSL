@@ -27,6 +27,7 @@ from dzsl.ui.branding import DZSL_WORDMARK
 from dzsl.ui.favorites import ListView
 from dzsl.ui.helpers import clear_box
 from dzsl.ui.mods import ModsView
+from dzsl.ui.owner import OwnerView
 from dzsl.ui.servers import ServersView
 from dzsl.ui.settings import SettingsView
 from dzsl.ui.styles import CSS
@@ -116,6 +117,7 @@ class DZSL(Adw.Application):
             ("favorites", "favorites"),
             ("recent", "recent"),
             ("mods", "mods"),
+            ("owner", "my server"),
             ("settings", "settings"),
         ]:
             b = Gtk.Button(label=label)
@@ -424,6 +426,8 @@ class DZSL(Adw.Application):
             ServersView(self.panel, self.cfg, self.favorites, self.connector.connect, self.toggle_fav, self.set_status, self.connector.load_mods).build()
         elif view == "mods":
             ModsView(self.panel, self.cfg, self.set_status, self.set_downloading).build()
+        elif view == "owner":
+            OwnerView(self.panel, self.set_status, win=self.win, steam_account=self._steam_account).build()
         elif view == "settings":
             SettingsView(
                 self.panel,
