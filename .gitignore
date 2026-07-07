@@ -88,3 +88,4 @@ tests/test_steam_readiness.py
 SESSION_NOTES.md
 bug report.md
 bin/bump-version.sh
+tests/test_release_metadata.py
