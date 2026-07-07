@@ -13,7 +13,7 @@ from dzsl.runtime import open_external_uri
 from dzsl.services import owner as owner_api
 from dzsl.services.owner import TEXT_LIMITS, URL_LIMITS, dashboard_url
 from dzsl.ui.helpers import clear_box
-from dzsl.ui.owner_login import OwnerLoginWindow, WEBKIT_INSTALL_HINT, webkit_available
+from dzsl.ui.owner_login import OwnerLoginWindow
 
 log = get_logger("owner")
 
@@ -146,7 +146,8 @@ class OwnerView:
         )
         self._label(
             body,
-            "Claiming and verifying a new server happens on the web dashboard.",
+            "Signing in opens your browser for a one-click approval. Claiming and "
+            "verifying a new server happens on the web dashboard.",
             dim=True,
         )
         self._button_row(
@@ -271,15 +272,7 @@ class OwnerView:
     # ── actions ─────────────────────────────────────────────────────────
 
     def _start_sign_in(self):
-        if not webkit_available():
-            self._alert("WebKitGTK required", WEBKIT_INSTALL_HINT)
-            return
-        try:
-            window = OwnerLoginWindow(self.win, self._on_signed_in)
-        except RuntimeError as exc:
-            self._alert("WebKitGTK required", str(exc))
-            return
-        window.present()
+        OwnerLoginWindow(self.win, self._on_signed_in).present()
 
     def _on_signed_in(self, token):
         try:

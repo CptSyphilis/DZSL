@@ -90,6 +90,37 @@ def logout(token, base_url=None, timeout=10):
         pass
 
 
+def start_app_link(base_url=None, timeout=10):
+    """Begin the browser-approve sign-in: mint an approval code on the site.
+
+    Returns {code, poll, url} — open `url` in the user's default browser (where
+    they are usually already signed in) and hand code/poll to poll_app_link().
+    """
+    base = _base_url(base_url)
+    payload = request_json(
+        f"{base}/api/app/start", method="POST", headers=OWNER_HEADERS, timeout=timeout
+    )
+    code = payload.get("code") if isinstance(payload, dict) else None
+    poll = payload.get("poll") if isinstance(payload, dict) else None
+    if not (_valid_token(code) and _valid_token(poll)):
+        raise RequestError("Sign-in API returned invalid data")
+    return {"code": code, "poll": poll, "url": f"{base}/link?code={code}"}
+
+
+def poll_app_link(code, poll, base_url=None, timeout=10):
+    """One poll for the browser approval. Returns the session token, or None
+    while still pending. Raises RequestError (status 404) once the code expires."""
+    payload = request_json(
+        f"{_base_url(base_url)}/api/app/poll",
+        method="POST",
+        json_body={"code": code, "poll": poll},
+        headers=OWNER_HEADERS,
+        timeout=timeout,
+    )
+    token = payload.get("token") if isinstance(payload, dict) else None
+    return token if _valid_token(token) else None
+
+
 def _clean_owner_listing(value):
     if not isinstance(value, dict):
         return None

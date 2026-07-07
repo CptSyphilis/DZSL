@@ -95,6 +95,42 @@ class AuthTest(unittest.TestCase):
         self.assertEqual(request.call_args.kwargs["method"], "POST")
 
 
+class AppLinkTest(unittest.TestCase):
+    def test_start(self):
+        payload = {"code": "b" * 64, "poll": "c" * 64, "expiresIn": 600}
+        with patch("dzsl.services.owner.request_json", return_value=payload) as request:
+            link = owner.start_app_link()
+        request.assert_called_once_with(
+            "https://dayzlinux.com/api/app/start",
+            method="POST",
+            headers=owner.OWNER_HEADERS,
+            timeout=10,
+        )
+        self.assertEqual(link["url"], "https://dayzlinux.com/link?code=" + "b" * 64)
+
+    def test_start_invalid_payload(self):
+        with patch("dzsl.services.owner.request_json", return_value={"code": "x"}):
+            with self.assertRaises(RequestError):
+                owner.start_app_link()
+
+    def test_poll_pending(self):
+        with patch("dzsl.services.owner.request_json", return_value={"pending": True}) as request:
+            self.assertIsNone(owner.poll_app_link("b" * 64, "c" * 64))
+        self.assertEqual(
+            request.call_args.kwargs["json_body"], {"code": "b" * 64, "poll": "c" * 64}
+        )
+
+    def test_poll_approved(self):
+        with patch("dzsl.services.owner.request_json", return_value={"token": TOKEN}):
+            self.assertEqual(owner.poll_app_link("b" * 64, "c" * 64), TOKEN)
+
+    def test_poll_expired_propagates(self):
+        with patch("dzsl.services.owner.request_json", side_effect=RequestError("expired", status=404)):
+            with self.assertRaises(RequestError) as ctx:
+                owner.poll_app_link("b" * 64, "c" * 64)
+        self.assertEqual(ctx.exception.status, 404)
+
+
 class FetchClaimsTest(unittest.TestCase):
     def test_parses_items(self):
         payload = {
