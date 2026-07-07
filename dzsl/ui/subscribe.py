@@ -45,6 +45,19 @@ def steam_progress_phase(
     return "Steam is staging download"
 
 
+def effective_progress(bytes_done, bytes_total, staging_allocated, size_hint):
+    """Fill in progress from staged bytes while the manifest lags behind.
+
+    Steam flushes BytesDownloaded/BytesToDownload to the workshop manifest
+    lazily; small mods can finish before the fields ever appear. The bytes
+    Steam has staged on disk, measured against the size the web API reported,
+    give a usable estimate until the manifest catches up.
+    """
+    if not bytes_total and size_hint and staging_allocated:
+        return min(staging_allocated, size_hint), size_hint
+    return bytes_done, bytes_total
+
+
 def launch_steam():
     if is_flatpak():
         return forward_steam_uri("steam://open/main")
@@ -128,6 +141,20 @@ class SteamSubscriptionManager:
             log.error("Could not suspend Workshop downloads: %s", error)
         return ok
 
+    def cancel_downloads(self, mod_ids):
+        # SuspendDownloads only holds while the calling process lives, so a
+        # helper's suspend lifts the moment it exits and Steam resumes.
+        # Unsubscribing is the one cancel signal Steam honours afterwards.
+        ids = [str(mid) for mid in mod_ids or []]
+        if not ids:
+            return True
+        if is_flatpak():
+            return False
+        ok, error = run_workshop_helper("unsubscribe", ids)
+        if not ok and error:
+            log.error("Could not cancel Workshop downloads: %s", error)
+        return ok
+
     def steam_item_status(self, mod_id):
         # Progress and state come from Steam's workshop ACF manifests
         # (mod_download_progress / mod_staging_signature); querying the live
@@ -177,11 +204,14 @@ class SteamSubscriptionManager:
                 bytes_done, bytes_total = steam_progress
             elif steam_bytes_done and not bytes_done:
                 bytes_done = steam_bytes_done
+            staging = mod_staging_signature(self.cfg, mid)
+            staging_active = staging != last_staging and staging != (0, 0)
+            bytes_done, bytes_total = effective_progress(
+                bytes_done, bytes_total, staging[0], size_bytes
+            )
             if bytes_done != last_bytes:
                 last_bytes = bytes_done
                 last_activity = now
-            staging = mod_staging_signature(self.cfg, mid)
-            staging_active = staging != last_staging and staging != (0, 0)
             if staging_active:
                 last_activity = now
             last_staging = staging

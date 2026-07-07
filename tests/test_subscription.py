@@ -2,7 +2,11 @@ import unittest
 from unittest.mock import Mock, patch
 
 from dzsl.steam.api import SteamWorkshopAPI
-from dzsl.ui.subscribe import SteamSubscriptionManager, steam_progress_phase
+from dzsl.ui.subscribe import (
+    SteamSubscriptionManager,
+    effective_progress,
+    steam_progress_phase,
+)
 
 
 class SubscriptionTests(unittest.TestCase):

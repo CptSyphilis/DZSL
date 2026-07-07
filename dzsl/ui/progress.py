@@ -20,6 +20,8 @@ class ModProgressDialog:
     def __init__(self, mod_ids, names, on_cancel=None,
                  on_open_downloads=None):
         self._cancel   = threading.Event()
+        self._paused   = threading.Event()
+        self._skip     = threading.Event()
         self._closed   = False
         self.on_cancel = on_cancel
         self.on_open_downloads = on_open_downloads

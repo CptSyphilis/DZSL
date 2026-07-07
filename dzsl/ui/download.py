@@ -14,6 +14,7 @@ class ModDownloadManager:
         self.refresh_cfg = refresh_cfg
         self.set_status = set_status
         self.subscriptions = subscriptions
+        self._active_ids = []
 
     @property
     def cfg(self):
@@ -23,11 +24,21 @@ class ModDownloadManager:
         return progress and progress.is_cancelled()
 
     def stop_active_downloads(self):
+        pending = [mid for mid in self._active_ids if not mod_installed(self.cfg, mid)]
+
         def worker():
-            if self.subscriptions.suspend_downloads():
-                self.set_status("Steam Workshop download paused.")
+            # Suspend is a brake that releases when the helper exits; only
+            # unsubscribing actually takes the items out of Steam's queue.
+            self.subscriptions.suspend_downloads()
+            if not pending:
+                self.set_status("Steam Workshop download stopped.")
+                return
+            if self.subscriptions.cancel_downloads(pending):
+                self.set_status(
+                    f"Stopped download and unsubscribed {len(pending)} pending mod(s)."
+                )
             else:
-                self.set_status("Could not pause the Steam Workshop download.")
+                self.set_status("Could not stop the Steam Workshop download.")
         threading.Thread(target=worker, daemon=True).start()
 
     def count_installed_mods(self, mod_ids):
@@ -124,16 +135,20 @@ class ModDownloadManager:
                 progress.set_download_progress(current_done, total)
             log.info("Done: %s", mod_name)
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=n_parallel) as executor:
-            futures = {executor.submit(download_one, mid): mid for mid in pending}
-            for future in concurrent.futures.as_completed(futures):
-                try:
-                    future.result()
-                except Exception as exc:
-                    mid = futures[future]
-                    log.error("Unhandled error downloading %s: %s", mid, exc)
-                    with done_lock:
-                        errors.append(str(exc))
+        self._active_ids = list(pending)
+        try:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=n_parallel) as executor:
+                futures = {executor.submit(download_one, mid): mid for mid in pending}
+                for future in concurrent.futures.as_completed(futures):
+                    try:
+                        future.result()
+                    except Exception as exc:
+                        mid = futures[future]
+                        log.error("Unhandled error downloading %s: %s", mid, exc)
+                        with done_lock:
+                            errors.append(str(exc))
+        finally:
+            self._active_ids = []
 
         if progress and progress.is_cancelled():
             return False, "cancelled"
