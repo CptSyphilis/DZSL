@@ -1,7 +1,11 @@
+import threading
+
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Gtk, Gdk, Adw
+from gi.repository import Gtk, Gdk, GLib, Adw
+
+from dzsl.services.a2s import A2SError, query_mods
 
 from dzsl.ui.helpers import (
     normalize_map_name,
@@ -41,6 +45,42 @@ def _section(title, rows):
         group.append(_field(label, value))
 
     return group
+
+
+def _mod_group(mods):
+    mod_group = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+    mod_group.add_css_class("settings-group")
+    mod_heading = Gtk.Label(label=f"Mods ({len(mods)})")
+    mod_heading.add_css_class("settings-title")
+    mod_heading.set_halign(Gtk.Align.START)
+    mod_group.append(mod_heading)
+
+    mod_scroll = Gtk.ScrolledWindow()
+    mod_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+    max_h = 220
+    min_h = min(min(len(mods), 8) * 28, max_h)
+    mod_scroll.set_min_content_height(min_h)
+    mod_scroll.set_max_content_height(max_h)
+
+    mod_list = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+    for m in mods[:40]:
+        name = m.get("name") or m.get("steamWorkshopId") or m.get("id") or "?"
+        mid = m.get("steamWorkshopId") or m.get("id") or ""
+        line = Gtk.Label(label=f"{name}  ({mid})" if mid else name)
+        line.add_css_class("mod-id")
+        line.set_halign(Gtk.Align.START)
+        line.set_wrap(True)
+        line.set_selectable(True)
+        mod_list.append(line)
+    if len(mods) > 40:
+        more = Gtk.Label(label=f"… and {len(mods) - 40} more")
+        more.add_css_class("status-txt")
+        more.set_halign(Gtk.Align.START)
+        mod_list.append(more)
+
+    mod_scroll.set_child(mod_list)
+    mod_group.append(mod_scroll)
+    return mod_group
 
 
 def show_server_properties(parent, server):
@@ -115,39 +155,37 @@ def show_server_properties(parent, server):
     ]))
 
     if mods:
-        mod_group = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        mod_group.add_css_class("settings-group")
-        mod_heading = Gtk.Label(label=f"Mods ({len(mods)})")
-        mod_heading.add_css_class("settings-title")
-        mod_heading.set_halign(Gtk.Align.START)
-        mod_group.append(mod_heading)
+        body.append(_mod_group(mods))
+    elif server.get("modded") and ip and query_port:
+        holder = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        loading = Gtk.Label(label="Loading mods...")
+        loading.add_css_class("status-txt")
+        loading.set_halign(Gtk.Align.START)
+        holder.append(loading)
+        body.append(holder)
 
-        mod_scroll = Gtk.ScrolledWindow()
-        mod_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        max_h = 220
-        min_h = min(min(len(mods), 8) * 28, max_h)
-        mod_scroll.set_min_content_height(min_h)
-        mod_scroll.set_max_content_height(max_h)
+        def fetch_mods():
+            try:
+                fetched = query_mods(ip, int(query_port))
+            except (A2SError, ValueError):
+                fetched = []
 
-        mod_list = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        for m in mods[:40]:
-            name = m.get("name") or m.get("steamWorkshopId") or m.get("id") or "?"
-            mid = m.get("steamWorkshopId") or m.get("id") or ""
-            line = Gtk.Label(label=f"{name}  ({mid})" if mid else name)
-            line.add_css_class("mod-id")
-            line.set_halign(Gtk.Align.START)
-            line.set_wrap(True)
-            line.set_selectable(True)
-            mod_list.append(line)
-        if len(mods) > 40:
-            more = Gtk.Label(label=f"… and {len(mods) - 40} more")
-            more.add_css_class("status-txt")
-            more.set_halign(Gtk.Align.START)
-            mod_list.append(more)
+            def apply():
+                for child in list(holder):
+                    holder.remove(child)
+                if fetched:
+                    server["mods"] = fetched
+                    holder.append(_mod_group(filter_server_mods(fetched)))
+                else:
+                    failed = Gtk.Label(label="Mod list unavailable")
+                    failed.add_css_class("status-txt")
+                    failed.set_halign(Gtk.Align.START)
+                    holder.append(failed)
+                return False
 
-        mod_scroll.set_child(mod_list)
-        mod_group.append(mod_scroll)
-        body.append(mod_group)
+            GLib.idle_add(apply)
+
+        threading.Thread(target=fetch_mods, daemon=True).start()
 
     scroll.set_child(body)
     root.append(scroll)

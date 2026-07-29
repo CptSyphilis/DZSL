@@ -2,6 +2,7 @@ import re
 import subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dzsl.core.uri import validate_host
+from dzsl.services.a2s import A2SError, query_info
 
 
 def measure_ping(ip, timeout=1.5):
@@ -29,14 +30,25 @@ def server_ip(server):
     return server.get("ip") or server.get("endpoint", {}).get("ip")
 
 
+def _ping_server(server, ip):
+    qport = server.get("queryPort")
+    if qport:
+        try:
+            return query_info(ip, qport, timeout=1.5)["ping"]
+        except A2SError:
+            pass
+    return measure_ping(ip)
+
+
 def ping_servers(servers, max_workers=16, limit=80):
     targets = []
     seen = set()
     for server in servers:
         ip = server_ip(server)
-        if not ip or ip in seen:
+        key = (ip, server.get("queryPort", 0))
+        if not ip or key in seen:
             continue
-        seen.add(ip)
+        seen.add(key)
         targets.append((server, ip))
         if len(targets) >= limit:
             break
@@ -45,7 +57,7 @@ def ping_servers(servers, max_workers=16, limit=80):
         return
 
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        futures = {pool.submit(measure_ping, ip): server for server, ip in targets}
+        futures = {pool.submit(_ping_server, server, ip): server for server, ip in targets}
         for future in as_completed(futures):
             server = futures[future]
             try:
