@@ -1,3 +1,4 @@
+import gzip
 import json
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit
@@ -31,13 +32,20 @@ def _json_request(url, method="GET", params=None, data=None, json_body=None, hea
     elif data is not None:
         body = urlencode(data).encode()
         content_type = "application/x-www-form-urlencoded"
-    request_headers = {"Accept": "application/json", **(headers or {})}
+    request_headers = {
+        "Accept": "application/json",
+        "Accept-Encoding": "gzip",
+        **(headers or {}),
+    }
     if content_type is not None:
         request_headers["Content-Type"] = content_type
     request = Request(url, data=body, headers=request_headers, method=method)
     try:
         with urlopen(request, timeout=timeout) as response:  # nosec B310
-            return json.load(response)
+            raw = response.read()
+            if response.headers.get("Content-Encoding", "").lower() == "gzip":
+                raw = gzip.decompress(raw)
+            return json.loads(raw)
     except HTTPError as exc:
         raise RequestError(str(exc), status=exc.code) from exc
     except (URLError, OSError, ValueError) as exc:
