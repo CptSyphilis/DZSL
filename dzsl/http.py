@@ -10,7 +10,7 @@ class RequestError(RuntimeError):
         super().__init__(message)
         self.status = status
 
-
+    
 def _json_request(url, method="GET", params=None, data=None, json_body=None, headers=None, timeout=30):
     parsed = urlsplit(url)
     local_http = parsed.scheme == "http" and parsed.hostname in ("localhost", "127.0.0.1", "::1")
