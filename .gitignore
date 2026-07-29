@@ -87,3 +87,5 @@ tests/test_steam_readiness.py
 # Session/AI working docs — never belong in the public repo
 SESSION_NOTES.md
 bug report.md
+bin/bump-version.sh
+tests/test_release_metadata.py

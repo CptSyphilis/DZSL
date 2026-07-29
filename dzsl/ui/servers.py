@@ -1,4 +1,7 @@
+import gzip
+import json
 import os
+import time
 import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
@@ -7,7 +10,7 @@ import threading
 from dzsl.core.config import load_json, save_json, FILTERS_FILE
 from dzsl.core.environment import load_environment
 from dzsl.core.logging import get_logger
-from dzsl.paths import ENV_FILE
+from dzsl.paths import CONFIG_DIR, ENV_FILE
 from dzsl.services.listings import attach_featured_listings, featured_listings, pin_featured_servers
 from dzsl.services.server_api import DEFAULT_LIST_URL, fetch_servers
 from dzsl.ui.server_row import copy_text, popup_at_cursor, dismiss_popover, ServerRow
@@ -24,6 +27,10 @@ log = get_logger("servers")
 
 load_environment(ENV_FILE)
 API_URL = os.getenv("API_URL", DEFAULT_LIST_URL)
+# Last fetched list, gzipped: shown instantly on startup while the network
+# refresh runs, and the only thing standing between the user and an empty
+# browser when every upstream is down.
+CACHE_FILE = CONFIG_DIR / "servers_cache.json.gz"
 
 # Persist filter state between view switches
 _filter_state = {
@@ -243,6 +250,7 @@ class ServersView:
             self.apply_filters()
             self._start_gold_fetch()
         else:
+            threading.Thread(target=self._load_cache_thread, daemon=True).start()
             self.fetch()
 
     def _on_map_selected(self, *_args):
@@ -546,12 +554,44 @@ class ServersView:
         self._set_refresh_enabled(True)
         return False
 
+    def _load_cache_thread(self):
+        try:
+            with gzip.open(CACHE_FILE, "rt", encoding="utf-8") as fh:
+                servers = json.load(fh).get("servers", [])
+        except (OSError, ValueError):
+            return
+        if not servers:
+            return
+
+        def apply():
+            if self.all_servers:  # network fetch already landed; cache is moot
+                return False
+            log.info("Showing %d cached servers while fetching", len(servers))
+            self.all_servers = servers
+            _filter_state["servers"] = servers
+            self._update_version_filter()
+            self._update_map_filter()
+            self.apply_filters()
+            if self._fetching:
+                self.set_status("Showing cached list — refreshing...")
+            return False
+
+        GLib.idle_add(apply)
+
+    def _save_cache(self, servers):
+        try:
+            with gzip.open(CACHE_FILE, "wt", encoding="utf-8") as fh:
+                json.dump({"saved": time.time(), "servers": servers}, fh)
+        except OSError as exc:
+            log.warning("Could not save server cache: %s", exc)
+
     def _fetch_thread(self):
         try:
             self.all_servers = fetch_servers(API_URL)
             attach_featured_listings(self.all_servers, self.gold_listings)
             _filter_state["servers"] = self.all_servers
             log.info("Fetched %d servers", len(self.all_servers))
+            self._save_cache(self.all_servers)
             GLib.idle_add(self._update_version_filter)
             GLib.idle_add(self._update_map_filter)
             GLib.idle_add(self.apply_filters)

@@ -1,3 +1,4 @@
+import gzip
 import json
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit
@@ -5,10 +6,12 @@ from urllib.request import Request, urlopen
 
 
 class RequestError(RuntimeError):
-    pass
+    def __init__(self, message, status=None):
+        super().__init__(message)
+        self.status = status
 
-
-def _json_request(url, method="GET", params=None, data=None, headers=None, timeout=30):
+    
+def _json_request(url, method="GET", params=None, data=None, json_body=None, headers=None, timeout=30):
     parsed = urlsplit(url)
     local_http = parsed.scheme == "http" and parsed.hostname in ("localhost", "127.0.0.1", "::1")
     if (
@@ -21,15 +24,31 @@ def _json_request(url, method="GET", params=None, data=None, headers=None, timeo
     if params:
         separator = "&" if "?" in url else "?"
         url = f"{url}{separator}{urlencode(params)}"
-    body = urlencode(data).encode() if data is not None else None
-    request_headers = {"Accept": "application/json", **(headers or {})}
-    if body is not None:
-        request_headers["Content-Type"] = "application/x-www-form-urlencoded"
+    body = None
+    content_type = None
+    if json_body is not None:
+        body = json.dumps(json_body).encode()
+        content_type = "application/json"
+    elif data is not None:
+        body = urlencode(data).encode()
+        content_type = "application/x-www-form-urlencoded"
+    request_headers = {
+        "Accept": "application/json",
+        "Accept-Encoding": "gzip",
+        **(headers or {}),
+    }
+    if content_type is not None:
+        request_headers["Content-Type"] = content_type
     request = Request(url, data=body, headers=request_headers, method=method)
     try:
         with urlopen(request, timeout=timeout) as response:  # nosec B310
-            return json.load(response)
-    except (HTTPError, URLError, OSError, ValueError) as exc:
+            raw = response.read()
+            if response.headers.get("Content-Encoding", "").lower() == "gzip":
+                raw = gzip.decompress(raw)
+            return json.loads(raw)
+    except HTTPError as exc:
+        raise RequestError(str(exc), status=exc.code) from exc
+    except (URLError, OSError, ValueError) as exc:
         raise RequestError(str(exc)) from exc
 
 
@@ -39,3 +58,7 @@ def get_json(url, params=None, headers=None, timeout=30):
 
 def post_form_json(url, data, headers=None, timeout=30):
     return _json_request(url, method="POST", data=data, headers=headers, timeout=timeout)
+
+
+def request_json(url, method="GET", json_body=None, headers=None, timeout=30):
+    return _json_request(url, method=method, json_body=json_body, headers=headers, timeout=timeout)
