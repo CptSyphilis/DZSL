@@ -28,6 +28,7 @@
   <url type="bugtracker">https://github.com/CptSyphilis/DZSL/issues</url>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="0.9.08" date="2026-07-29" />
     <release version="0.9.07" date="2026-07-29" />
     <release version="0.9.7" date="2026-07-29" />
     <release version="0.9.06" date="2026-07-07" />

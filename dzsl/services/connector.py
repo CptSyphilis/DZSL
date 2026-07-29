@@ -12,6 +12,7 @@ from dzsl.paths import ENV_FILE
 from dzsl.runtime import is_flatpak, open_external_uri
 from dzsl.services.dayz import ModSetupError, build_launch_command, build_launch_uri, setup_mod_links
 from dzsl.services.launch_gate import launch_block_reason
+from dzsl.services.a2s import query_mods
 from dzsl.services.server_api import fetch_server
 from dzsl.steam import gate as workshop_gate
 
@@ -212,6 +213,12 @@ class Connector:
         return f"{ip}:{port}"
 
     def _get_server_info(self, ip, port):
+        try:
+            mods = query_mods(ip, port)
+            if mods:
+                return {"mods": mods}
+        except (OSError, RuntimeError, ValueError):
+            pass
         try:
             return fetch_server(ip, port)
         except (OSError, RuntimeError, ValueError):

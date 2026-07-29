@@ -1,2 +1,2 @@
 APPLICATION_ID = "com.dayzlinux.dzsl"
-VERSION = "0.9.07"
+VERSION = "0.9.08"

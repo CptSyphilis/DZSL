@@ -63,6 +63,7 @@ class ServerRow(Gtk.Box):
         self.on_load_mods = on_load_mods or (lambda s: None)
         self.set_status = set_status or (lambda _msg: None)
         self.expanded = False
+        self._a2s_done = False
         self.gold_listing = server.get("_gold_listing") or {}
         if self.gold_listing:
             self.add_css_class("gold-server")
@@ -213,6 +214,35 @@ class ServerRow(Gtk.Box):
         self.details.set_visible(True)
         if not self.details.get_first_child():
             self._build_details()
+        if not self.server.get("mods") and not self._a2s_done:
+            threading.Thread(target=self._a2s_thread, daemon=True).start()
+
+    def _a2s_thread(self):
+        from dzsl.services.a2s import A2SError, query_info, query_mods
+        ip = self.server.get("ip") or self.server.get("endpoint", {}).get("ip", "")
+        qport = self.server.get("queryPort", 0)
+        if not ip or not qport:
+            return
+        try:
+            info = query_info(ip, qport)
+            mods = query_mods(ip, qport)
+        except A2SError:
+            return
+        self._a2s_done = True
+        self.server["password"] = info["password"]
+        self.server["battleye"] = info["vac"]
+        self.server["ping"] = info["ping"]
+        self.server["players"] = info["players"]
+        if mods:
+            self.server["mods"] = mods
+
+        def apply():
+            if self.expanded:
+                self._build_details()
+            self.update_ping()
+            return False
+
+        GLib.idle_add(apply)
 
     def _collapse(self):
         self.expanded = False
@@ -235,11 +265,14 @@ class ServerRow(Gtk.Box):
         mods = self.server.get("mods") or []
         if mods:
             mod_scroll = Gtk.ScrolledWindow()
+            mod_scroll.set_min_content_height(min(24 * (len(mods) + 1), 300))
             mod_scroll.set_max_content_height(300)
+            mod_scroll.set_propagate_natural_height(True)
             mod_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
             mod_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
             mod_lbl = Gtk.Label(label=f"Mods ({len(mods)})")
             mod_lbl.add_css_class("srv-detail")
+            mod_lbl.set_halign(Gtk.Align.START)
             mod_box.append(mod_lbl)
             for m in mods:
                 name = m.get("name") or m.get("steamWorkshopId") or "Unknown"
