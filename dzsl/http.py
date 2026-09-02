@@ -1,14 +1,53 @@
 import gzip
+import http.client
 import json
+import socket
+import ssl
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit
-from urllib.request import Request, urlopen
+from urllib.request import HTTPSHandler, Request, build_opener
 
 
 class RequestError(RuntimeError):
     def __init__(self, message, status=None):
         super().__init__(message)
         self.status = status
+
+
+# urllib tries resolved addresses sequentially with the full timeout each, so a
+# broken IPv6 route stalls every request 30s+ per AAAA record before IPv4 is
+# tried. Connect IPv4-first with a short per-address timeout instead.
+def _connect_ipv4_first(host, port, timeout):
+    infos = socket.getaddrinfo(host, port, 0, socket.SOCK_STREAM)
+    infos.sort(key=lambda info: info[0] != socket.AF_INET)
+    last_err = None
+    for family, socktype, proto, _, addr in infos:
+        sock = socket.socket(family, socktype, proto)
+        sock.settimeout(min(5, timeout) if timeout else 5)
+        try:
+            sock.connect(addr)
+            sock.settimeout(timeout)
+            return sock
+        except OSError as exc:
+            last_err = exc
+            sock.close()
+    raise last_err if last_err else OSError(f"could not connect to {host}:{port}")
+
+
+class _IPv4FirstHTTPSConnection(http.client.HTTPSConnection):
+    def connect(self):
+        self.sock = _connect_ipv4_first(self.host, self.port, self.timeout)
+        if self._tunnel_host:
+            self._tunnel()
+        self.sock = self._context.wrap_socket(self.sock, server_hostname=self.host)
+
+
+class _IPv4FirstHTTPSHandler(HTTPSHandler):
+    def https_open(self, req):
+        return self.do_open(_IPv4FirstHTTPSConnection, req, context=self._context)
+
+
+_opener = build_opener(_IPv4FirstHTTPSHandler(context=ssl.create_default_context()))
 
     
 def _json_request(url, method="GET", params=None, data=None, json_body=None, headers=None, timeout=30):
@@ -41,7 +80,7 @@ def _json_request(url, method="GET", params=None, data=None, json_body=None, hea
         request_headers["Content-Type"] = content_type
     request = Request(url, data=body, headers=request_headers, method=method)
     try:
-        with urlopen(request, timeout=timeout) as response:  # nosec B310
+        with _opener.open(request, timeout=timeout) as response:  # nosec B310
             raw = response.read()
             if response.headers.get("Content-Encoding", "").lower() == "gzip":
                 raw = gzip.decompress(raw)

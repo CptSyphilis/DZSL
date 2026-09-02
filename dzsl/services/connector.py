@@ -245,14 +245,18 @@ class Connector:
         return names
 
     def _resolve_mods(self, server):
-        server_mods = self._mods_from_server(server)
-        if server_mods:
-            return server_mods, self._mod_names_from_server(server)
+        # Always query live via A2S — stored server dicts (favorites, cached
+        # feed) carry mod lists frozen at save time, which get players kicked
+        # when the server's mod set changes.
         ip = self._server_ip(server)
         query_port = self._query_port(server)
         ids = self._get_server_mods(ip, query_port)
         if ids:
             return ids, self._mod_names(ip, query_port)
+        server_mods = self._mods_from_server(server)
+        if server_mods:
+            log.warning("A2S mod query failed for %s:%s — using stored mod list", ip, query_port)
+            return server_mods, self._mod_names_from_server(server)
         return [], {}
 
     def _game_params(self, password=None):
