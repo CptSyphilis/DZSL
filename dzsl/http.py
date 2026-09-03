@@ -91,6 +91,20 @@ def _json_request(url, method="GET", params=None, data=None, json_body=None, hea
         raise RequestError(str(exc)) from exc
 
 
+def get_text(url, headers=None, timeout=30):
+    request = Request(url, headers={"Accept-Encoding": "gzip", **(headers or {})})
+    try:
+        with _opener.open(request, timeout=timeout) as response:  # nosec B310
+            raw = response.read()
+            if response.headers.get("Content-Encoding", "").lower() == "gzip":
+                raw = gzip.decompress(raw)
+            return raw.decode("utf-8", "replace")
+    except HTTPError as exc:
+        raise RequestError(str(exc), status=exc.code) from exc
+    except (URLError, OSError, ValueError) as exc:
+        raise RequestError(str(exc)) from exc
+
+
 def get_json(url, params=None, headers=None, timeout=30):
     return _json_request(url, params=params, headers=headers, timeout=timeout)
 

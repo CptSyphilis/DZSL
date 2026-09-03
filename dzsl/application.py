@@ -21,6 +21,7 @@ from dzsl.lifecycle import cancel_active_downloads
 from dzsl.paths import ASSETS_DIR
 from dzsl.services.connector import Connector
 from dzsl.services.server_api import fetch_server
+from dzsl.services.updates import app_update_available, outdated_mods
 from dzsl.steam.login import steam_login_account
 from dzsl.ui.add_server import AddServerView
 from dzsl.ui.branding import DZSL_WORDMARK
@@ -30,6 +31,7 @@ from dzsl.ui.mods import ModsView
 from dzsl.ui.owner import OwnerView
 from dzsl.ui.servers import ServersView
 from dzsl.ui.settings import SettingsView
+from dzsl.ui.splash import SplashWindow
 from dzsl.ui.styles import CSS
 from dzsl.ui.subscribe import launch_steam
 from dzsl.ui.welcome import WelcomeView
@@ -194,9 +196,66 @@ class DZSL(Adw.Application):
         self.win.set_content(root)
         self.win.connect("realize", self._on_window_realize)
         self._show_steam_wait_screen()
-        self.win.present()
+        self._set_navigation_enabled(False)
 
-        self._start_steam_enforcement()
+        self.splash = SplashWindow(self)
+        self.splash.present()
+        threading.Thread(target=self._splash_checks, daemon=True).start()
+
+    def _splash_checks(self):
+        started = time.monotonic()
+        self.splash.set_step("Checking Steam sign-in…")
+        account = steam_login_account()
+
+        self.splash.set_step("Checking for mod updates…")
+        stale = []
+        try:
+            stale = outdated_mods(self.cfg)
+        except Exception as exc:
+            log.warning("Mod update check failed: %s", exc)
+
+        self.splash.set_step("Checking for DZSL updates…")
+        new_version = None
+        try:
+            new_version = app_update_available()
+        except Exception as exc:
+            log.warning("DZSL update check failed: %s", exc)
+
+        remaining = 5 - (time.monotonic() - started)
+        if remaining > 0:
+            self.splash.set_step("Ready")
+            time.sleep(remaining)
+        GLib.idle_add(self._splash_done, account, stale, new_version)
+
+    def _splash_done(self, account, stale, new_version):
+        self.splash.destroy()
+        self.splash = None
+        self.win.present()
+        self._on_initial_steam_check(account)
+        if new_version:
+            self.set_status(f"DZSL {new_version} is available (you have {VERSION})")
+        if stale:
+            self._show_mod_update_dialog(stale)
+        return False
+
+    def _show_mod_update_dialog(self, stale):
+        names = "\n".join(f"• {m['name']}" for m in stale[:12])
+        if len(stale) > 12:
+            names += f"\n… and {len(stale) - 12} more"
+        dlg = Adw.MessageDialog(
+            transient_for=self.win,
+            heading=f"{len(stale)} mod{'s need' if len(stale) != 1 else ' needs'} updating",
+            body=f"Newer Workshop versions exist for:\n\n{names}",
+        )
+        dlg.add_response("later", "Later")
+        dlg.add_response("mods", "Open Mods")
+        dlg.set_response_appearance("mods", Adw.ResponseAppearance.SUGGESTED)
+        dlg.connect("response", self._on_mod_update_response)
+        dlg.present()
+
+    def _on_mod_update_response(self, _dlg, response):
+        if response == "mods":
+            self.show_view("mods")
 
     def _on_window_realize(self, win):
         surface = win.get_surface()
@@ -252,10 +311,6 @@ class DZSL(Adw.Application):
         if current in self._idle_statuses() or current.startswith("Signed in to Steam as "):
             self._update_steam_status()
         return True
-
-    def _start_steam_enforcement(self):
-        self._set_navigation_enabled(False)
-        self._check_steam_login_async(self._on_initial_steam_check)
 
     def _on_initial_steam_check(self, account):
         if account:

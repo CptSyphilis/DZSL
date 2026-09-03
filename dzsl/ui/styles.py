@@ -351,4 +351,8 @@ popover.dl-toast > contents {
 .gold-link:hover { background: linear-gradient(to right, rgba(216,173,104,0.16), rgba(124,108,255,0.17), rgba(255,122,209,0.11));
                    border-color: #d8ad68; color: #fff0c9; }
 
+.splash { background: #090d12; border: 1px solid #1c242e; border-radius: 8px; }
+.splash-version { color: #6b7683; font-size: 12px; letter-spacing: 1px; }
+.splash-step { color: #aab8c3; font-size: 12px; }
+
 """
