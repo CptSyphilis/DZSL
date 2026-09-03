@@ -1,4 +1,5 @@
 # A2S (Source query) over plain UDP — no Steamworks, so Steam never thinks DayZ is running.
+import re
 import socket
 import struct
 import time
@@ -135,6 +136,10 @@ def query_info(host, port, timeout=_TIMEOUT):
             info["keywords"] = r.zstring()
         if edf & 0x01:
             r.u64()
+    # DayZ reports its login queue length as an "lqs<N>" keyword tag.
+    match = re.search(r"\blqs(\d+)", info.get("keywords", ""))
+    if match:
+        info["queue"] = int(match.group(1))
     return info
 
 

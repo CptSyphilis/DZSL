@@ -51,6 +51,24 @@ class ListView:
         rb.connect("clicked", lambda b: self._populate(box, self.servers))
         scroll.set_child(box); self.panel.append(scroll)
 
+    def _refresh_from_feed(self, servers):
+        # Stored favorite/recent entries are frozen at save time and usually
+        # lack queryPort, so rows can't be A2S-queried for live players/queue.
+        from dzsl.ui.servers import _filter_state
+        live = {}
+        for s in _filter_state.get("servers") or []:
+            ip = s.get("ip") or s.get("endpoint", {}).get("ip")
+            port = s.get("gamePort") or s.get("port")
+            if ip and port:
+                live[(ip, str(port))] = s
+        for s in servers:
+            fresh = live.get((s.get("ip"), str(s.get("port") or s.get("gamePort") or "")))
+            if not fresh:
+                continue
+            for key in ("queryPort", "players", "maxPlayers", "version", "time", "password"):
+                if fresh.get(key) is not None:
+                    s[key] = fresh[key]
+
     def _populate(self, box, servers):
         clear_box(box)
         self._expand_tracker[0] = None
@@ -59,6 +77,7 @@ class ListView:
             el.add_css_class("empty"); el.set_justify(Gtk.Justification.CENTER)
             el.set_margin_top(80); box.append(el)
             return
+        self._refresh_from_feed(servers)
         played_lookup = recent_map()
         for s in servers:
             is_fav = any(f.get("ip") == s.get("ip") and f.get("port") == s.get("port") for f in self.favorites)

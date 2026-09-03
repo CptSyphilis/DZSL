@@ -34,7 +34,7 @@ def _ping_server(server, ip):
     qport = server.get("queryPort")
     if qport:
         try:
-            return query_info(ip, qport, timeout=1.5)["ping"]
+            return query_info(ip, qport, timeout=1.5)
         except A2SError:
             pass
     return measure_ping(ip)
@@ -61,6 +61,12 @@ def ping_servers(servers, max_workers=16, limit=80):
         for future in as_completed(futures):
             server = futures[future]
             try:
-                server["ping"] = future.result()
+                result = future.result()
             except Exception:
-                server["ping"] = None
+                result = None
+            if isinstance(result, dict):
+                server["ping"] = result["ping"]
+                server["players"] = result["players"]
+                server["queue"] = result.get("queue", 0)
+            else:
+                server["ping"] = result

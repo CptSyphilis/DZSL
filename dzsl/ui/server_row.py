@@ -137,11 +137,11 @@ class ServerRow(Gtk.Box):
         map_lbl.set_halign(Gtk.Align.CENTER)
         self.main_row.append(map_lbl)
 
-        pl_lbl = Gtk.Label(label=f"{pl}/{mxp}")
-        pl_lbl.add_css_class("srv-players")
-        pl_lbl.set_size_request(72, -1)
-        pl_lbl.set_halign(Gtk.Align.CENTER)
-        self.main_row.append(pl_lbl)
+        self.pl_lbl = Gtk.Label(label=self._player_text())
+        self.pl_lbl.add_css_class("srv-players")
+        self.pl_lbl.set_size_request(72, -1)
+        self.pl_lbl.set_halign(Gtk.Align.CENTER)
+        self.main_row.append(self.pl_lbl)
 
         self.ping_lbl = Gtk.Label(label=self._ping_text(ping))
         self.ping_lbl.add_css_class(self._ping_class(ping))
@@ -233,6 +233,7 @@ class ServerRow(Gtk.Box):
         self.server["battleye"] = info["vac"]
         self.server["ping"] = info["ping"]
         self.server["players"] = info["players"]
+        self.server["queue"] = info.get("queue", 0)
         if mods:
             self.server["mods"] = mods
 
@@ -389,7 +390,14 @@ class ServerRow(Gtk.Box):
             return "ping-ok"
         return "ping-bad"
 
+    def _player_text(self):
+        pl = self.server.get("players", 0)
+        mxp = self.server.get("maxPlayers", self.server.get("maxplayers", 0))
+        queue = self.server.get("queue", 0)
+        return f"{pl}/{mxp}" + (f" +{queue}" if queue else "")
+
     def update_ping(self):
+        self.pl_lbl.set_text(self._player_text())
         ping = self.server.get("ping")
         self.ping_lbl.set_text(self._ping_text(ping))
         self.ping_lbl.remove_css_class("ping-good")
