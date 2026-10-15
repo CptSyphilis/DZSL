@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dzsl"
-version = "0.9.10"
+version = "0.9.11"
 description = "Native DayZ server launcher for Linux"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -15,7 +15,7 @@ dependencies = []
 dzsl = "dzsl.application:main"
 
 [tool.setuptools.package-data]
-dzsl = ["assets/*.png", "assets/*.svg", "assets/fonts/*.ttf", "assets/fonts/*.txt"]
+dzsl = ["assets/*.png", "assets/*.svg", "assets/fonts/*.ttf", "assets/fonts/*.txt", "steam/redist/*.so"]
 
 [tool.setuptools.packages.find]
 include = ["dzsl*"]

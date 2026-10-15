@@ -5,7 +5,38 @@ from gi.repository import Adw, Gtk, GLib
 from dzsl.core.config import DEFAULT_CFG, save_cfg, workshop_dir
 from dzsl.ui.helpers import forward_steam_uri, unsubscribe_mod_ids
 from dzsl.ui.workshop_actions import WorkshopActionRunner
+import os
 import threading
+
+
+def mods_dir_warning(path):
+    path = (path or "").strip()
+    if not path:
+        return ""
+    path = os.path.abspath(os.path.expanduser(path))
+    if not os.path.isdir(path):
+        return "Folder does not exist."
+    for nested in (
+        os.path.join(path, "content", "221100"),
+        os.path.join(path, "workshop", "content", "221100"),
+        os.path.join(path, "steamapps", "workshop", "content", "221100"),
+    ):
+        if os.path.isdir(nested):
+            return f"This is a Steam folder, not the DayZ mods folder. Use {nested}"
+    try:
+        entries = os.listdir(path)
+    except OSError:
+        return "Folder is not readable."
+    if any(name.startswith("appworkshop_") for name in entries):
+        return "This is Steam's Workshop root, not the DayZ mods folder (…/workshop/content/221100)."
+    has_mods = any(
+        name.isdigit() and os.path.isdir(os.path.join(path, name, "addons"))
+        for name in entries
+    )
+    if entries and not has_mods:
+        return "No DayZ Workshop mods found here (expected …/workshop/content/221100)."
+    return ""
+
 
 class SettingsView:
     def __init__(self, panel, cfg, set_status, reload_cb, set_downloading=None, saved_cb=None):
@@ -100,7 +131,21 @@ class SettingsView:
         # ── PATHS ──
         paths = card("PATHS")
         field_row(paths, "Steam Library Root",                        "steam_root",    "")
-        field_row(paths, "Custom Mods Folder (blank = auto-detect)", "mods_dir",      "")
+        mods_entry = field_row(paths, "Custom Mods Folder (blank = auto-detect)", "mods_dir", "")
+        mods_warning = Gtk.Label()
+        mods_warning.add_css_class("settings-field-warning")
+        mods_warning.set_halign(Gtk.Align.START)
+        mods_warning.set_wrap(True)
+        mods_warning.set_xalign(0)
+        paths.append(mods_warning)
+
+        def refresh_mods_warning(*_):
+            text = mods_dir_warning(mods_entry.get_text())
+            mods_warning.set_text(text)
+            mods_warning.set_visible(bool(text))
+
+        mods_entry.connect("changed", refresh_mods_warning)
+        refresh_mods_warning()
 
         # ── LAUNCH OPTIONS ──
         launch = card("LAUNCH OPTIONS")
@@ -177,7 +222,8 @@ class SettingsView:
 
     def _save_settings(self, *_):
         save_cfg(self.cfg)
-        self.set_status("Settings saved.")
+        warning = mods_dir_warning(self.cfg.get("mods_dir"))
+        self.set_status(f"Settings saved — mods folder: {warning}" if warning else "Settings saved.")
         self.saved_cb()
 
     def _confirm(self, heading, body, action_label, callback, destructive=False):

@@ -12,6 +12,8 @@ from dzsl.core.logging import get_logger
 
 log = get_logger("steam_api")
 
+_BUNDLED_LIB = os.path.join(os.path.dirname(__file__), "redist", "libsteam_api.so")
+
 class SteamWorkshopAPI:
     def __init__(self, app_id="221100"):
         self.app_id = str(app_id)
@@ -43,6 +45,7 @@ class SteamWorkshopAPI:
         configured = os.environ.get("DZSL_STEAM_API")
         candidates = [
             configured,
+            _BUNDLED_LIB,
             os.path.expanduser("~/.local/share/Steam/steamrt64/libsteam_api.so"),
             os.path.expanduser("~/.steam/root/steamrt64/libsteam_api.so"),
             os.path.expanduser(

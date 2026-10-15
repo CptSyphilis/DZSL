@@ -214,6 +214,7 @@ popover.dl-toast > contents {
                        font-family: monospace; }
 .settings-card-body { padding: 16px 16px; }
 .settings-field-label { color: #52616d; font-size: 10px; letter-spacing: 1px; font-family: monospace; }
+.settings-field-warning { color: #c39a4b; font-size: 11px; font-family: monospace; }
 .settings-note { color: #34414d; font-size: 10px; font-family: monospace; }
 .settings-check { color: #677684; font-size: 12px; }
 .settings-check:checked { color: #e9f0f5; }
