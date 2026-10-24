@@ -40,6 +40,22 @@ def _unparent_popover(popover):
     return False
 
 
+def on_search_settled(entry, callback, delay_ms=300):
+    pending = [None]
+
+    def fire():
+        pending[0] = None
+        callback(entry.get_text())
+        return False
+
+    def changed(_entry):
+        if pending[0]:
+            GLib.source_remove(pending[0])
+        pending[0] = GLib.timeout_add(delay_ms, fire)
+
+    entry.connect("changed", changed)
+
+
 def dismiss_popover(popover):
     if not popover:
         return
@@ -711,7 +727,7 @@ class ModsView:
         self._installed_rebuild = lambda: populate(se.get_text())
         populate(refresh=True)
         self._load_usage()
-        se.connect("changed", lambda e: populate(e.get_text()))
+        on_search_settled(se, populate)
         ub.connect("clicked", check_updates)
         scroll.set_child(self.inst_box); self.content.append(scroll)
 
@@ -1132,7 +1148,7 @@ class ModsView:
                 row.add_controller(click)
                 box.append(row)
 
-        search.connect("changed", lambda entry: render(entry.get_text()))
+        on_search_settled(search, render)
 
         def fetch():
             mods = get_installed_mods(self.cfg)
