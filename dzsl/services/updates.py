@@ -3,7 +3,8 @@ import re
 
 from dzsl.core.config import get_installed_mods, workshop_acf_paths
 from dzsl.core.constants import VERSION
-from dzsl.http import get_text
+from dzsl.http import get_json, get_text
+from dzsl.services.listings import _base_url
 from dzsl.steam.web_api import published_file_details
 from dzsl.steam.workshop import item_record
 
@@ -49,3 +50,19 @@ def app_update_available(timeout=8):
     if _version_tuple(remote) > _version_tuple(VERSION):
         return remote
     return None
+
+
+# Release notes for this version and older, plus operator notices, newest first.
+def fetch_changelog(timeout=8):
+    data = get_json(f"{_base_url()}/changelog.json", timeout=timeout)
+    entries = data.get("entries") if isinstance(data, dict) else None
+    out = []
+    for entry in entries or []:
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("notice") and isinstance(entry.get("text"), str):
+            out.append({"notice": True, "date": str(entry.get("date") or ""), "text": entry["text"]})
+        elif isinstance(entry.get("version"), str) and _version_tuple(entry["version"]) <= _version_tuple(VERSION):
+            items = [str(i) for i in entry.get("items") or [] if isinstance(i, str)]
+            out.append({"version": entry["version"], "date": str(entry.get("date") or ""), "items": items})
+    return out

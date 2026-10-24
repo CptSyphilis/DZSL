@@ -1,10 +1,14 @@
 import os
+import threading
 
 import gi
 gi.require_version('Gtk', '4.0')
-from gi.repository import Gtk
+gi.require_version('Adw', '1')
+from gi.repository import Adw, GLib, Gtk
 
 from dzsl.core.config import RECENT_FILE, VERSION, load_json
+from dzsl.http import RequestError
+from dzsl.services.updates import fetch_changelog
 from dzsl.paths import asset_path
 
 BG_PATH = str(asset_path("dzsl-bg.png"))
@@ -88,6 +92,10 @@ class WelcomeView:
             b.add_css_class("welcome-secondary")
             b.connect("clicked", lambda _, v=view: self.show_view(v))
             row.append(b)
+        news = Gtk.Button(label="What's new")
+        news.add_css_class("welcome-secondary")
+        news.connect("clicked", lambda _: self._show_changelog())
+        row.append(news)
         vbox.append(row)
 
         # ── Stat line ──
@@ -97,6 +105,16 @@ class WelcomeView:
         )
         stats.add_css_class("welcome-stats")
         vbox.append(stats)
+
+        self.notice = Gtk.Label()
+        self.notice.add_css_class("welcome-notice")
+        self.notice.set_wrap(True)
+        self.notice.set_max_width_chars(70)
+        self.notice.set_justify(Gtk.Justification.CENTER)
+        self.notice.set_visible(False)
+        vbox.append(self.notice)
+        self.changelog = None
+        threading.Thread(target=self._load_changelog, daemon=True).start()
 
         scrim.append(vbox)
         overlay.add_overlay(scrim)
@@ -111,6 +129,62 @@ class WelcomeView:
         overlay.add_overlay(ver)
 
         self.panel.append(overlay)
+
+    def _load_changelog(self):
+        try:
+            entries = fetch_changelog()
+        except RequestError:
+            entries = None
+        GLib.idle_add(self._changelog_loaded, entries)
+
+    def _changelog_loaded(self, entries):
+        self.changelog = entries
+        notice = next((e for e in entries or [] if e.get("notice")), None)
+        if notice:
+            self.notice.set_text(f"NOTICE  ·  {notice['text']}")
+            self.notice.set_visible(True)
+        return False
+
+    def _show_changelog(self):
+        dlg = Adw.Dialog()
+        dlg.set_title("What's new")
+        dlg.set_content_width(520)
+        dlg.set_content_height(520)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        box.append(Adw.HeaderBar())
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_vexpand(True)
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        body.set_margin_start(20)
+        body.set_margin_end(20)
+        body.set_margin_bottom(20)
+        if self.changelog is None:
+            msg = Gtk.Label(label="Couldn't load the changelog. Check your connection and try again.")
+            msg.set_wrap(True)
+            body.append(msg)
+        for entry in self.changelog or []:
+            if entry.get("notice"):
+                head = Gtk.Label(label=f"NOTICE  ·  {entry['date']}" if entry["date"] else "NOTICE")
+                head.add_css_class("changelog-notice")
+                lines = [entry["text"]]
+            else:
+                head = Gtk.Label(label=f"v{entry['version']}" + (f"  ·  {entry['date']}" if entry["date"] else ""))
+                head.add_css_class("changelog-version")
+                lines = [f"•  {item}" for item in entry["items"]]
+            head.set_halign(Gtk.Align.START)
+            head.set_margin_top(12)
+            body.append(head)
+            for line in lines:
+                lbl = Gtk.Label(label=line)
+                lbl.set_wrap(True)
+                lbl.set_xalign(0)
+                lbl.add_css_class("changelog-item")
+                body.append(lbl)
+        scroll.set_child(body)
+        box.append(scroll)
+        dlg.set_child(box)
+        dlg.present(self.panel.get_root())
 
     def _build_resume_card(self, server):
         name = server.get("name", "Unknown server")
