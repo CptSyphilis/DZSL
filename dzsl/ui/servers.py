@@ -775,7 +775,11 @@ class ServersView:
             self._ping_rounds += 1
             self._start_ping(unpinged[:80], refilter=True)
         else:
-            self._start_ping(visible[:80])
+            targets = visible[:80]
+            if from_ping:
+                targets = [server for server in targets if not server.get("_pinged")]
+            if targets:
+                self._start_ping(targets, refilter=self.sort_key in ("ping", "mods"))
 
     def _start_ping(self, servers, refilter=False):
         self._ping_generation += 1
