@@ -90,3 +90,4 @@ bug report.md
 bin/bump-version.sh
 tests/test_release_metadata.py
 !dzsl/steam/redist/libsteam_api.so
+FLATHUB_PLAN.md
