@@ -6,14 +6,17 @@ import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Gdk', '4.0')
 gi.require_version('Graphene', '1.0')
-from gi.repository import Gdk, Gio, Graphene, Gtk, GLib
-from dzsl.core.config import get_installed_mods, mod_subscribed, workshop_dirs
+gi.require_version('Adw', '1')
+from gi.repository import Adw, Gdk, Gio, Graphene, Gtk, GLib
+from dzsl.core.config import get_installed_mods, is_steam_running, mod_subscribed, workshop_dirs
 from dzsl.core.environment import load_environment
 from dzsl.http import RequestError
 from dzsl.paths import ENV_FILE
 from dzsl.steam.workshop import validate_mod_folder
 from dzsl.steam.web_api import player_summaries, published_file_details
-from dzsl.ui.helpers import clear_box, forward_steam_uri, unsubscribe_mod_ids
+from dzsl.ui.helpers import (
+    clear_box, favorite_mod_usage, forward_steam_uri, transient_window, unsubscribe_mod_ids,
+)
 from dzsl.ui.workshop_actions import WorkshopActionRunner
 
 load_environment(ENV_FILE)
@@ -115,6 +118,12 @@ class InstalledModRow(Gtk.Box):
         info.append(ident)
         main.append(info)
 
+        self.use_label = Gtk.Label(label="…")
+        self.use_label.add_css_class("mod-id")
+        self.use_label.set_size_request(110, -1)
+        main.append(self.use_label)
+        self.set_usage(owner._mod_usage.get(mod["id"]), owner._usage_loaded)
+
         self.status_label = Gtk.Label(label="CHECKING")
         self.status_label.add_css_class("mod-state-pill")
         main.append(self.status_label)
@@ -187,6 +196,17 @@ class InstalledModRow(Gtk.Box):
         valid, reason = validation or validate_mod_folder(mod["path"])
         self._set_state("warn" if valid else "bad", "Checking Workshop…" if valid else reason)
         self._set_selected_visual(self.select_check.get_active())
+
+    def set_usage(self, servers, loaded=True):
+        if not loaded:
+            self.use_label.set_text("…")
+            self.use_label.set_tooltip_text("Checking which favourite servers use this mod")
+        elif servers:
+            self.use_label.set_text(f"In use · {len(servers)}")
+            self.use_label.set_tooltip_text("Used by your favourites:\n" + "\n".join(servers))
+        else:
+            self.use_label.set_text("Not in use")
+            self.use_label.set_tooltip_text("None of your favourite servers use this mod")
 
     def _set_state(self, state, text):
         for css_class in ("mod-status-good", "mod-status-warn", "mod-status-bad", "mod-status-update"):
@@ -408,6 +428,9 @@ class ModsView:
         self._selection_label = None
         self._select_button = None
         self._update_button = None
+        self._mod_usage = {}
+        self._usage_unknown = []
+        self._usage_loaded = False
 
     def _fetch_creator_profiles(self, creator_ids):
         ids = [str(cid) for cid in creator_ids if cid]
@@ -523,6 +546,15 @@ class ModsView:
         ib.add_css_class("toolbar-btn")
         ib.connect("clicked", lambda _: self._install_workshop_id(install_id))
         tb.append(ib)
+        vb = Gtk.Button(label="Verify all")
+        vb.add_css_class("toolbar-btn")
+        vb.connect("clicked", lambda *_: self._verify_mods(list(self._installed_mod_map.values())))
+        tb.append(vb)
+        rb = Gtk.Button(label="Remove unused")
+        rb.add_css_class("toolbar-btn")
+        rb.set_tooltip_text("Unsubscribe from mods none of your favourite servers use")
+        rb.connect("clicked", lambda *_: self._prompt_remove_unused())
+        tb.append(rb)
         ub = Gtk.Button(label="Check updates"); ub.add_css_class("toolbar-btn"); ub.add_css_class("accent"); tb.append(ub)
         self._update_button = ub
         self.content.append(tb)
@@ -678,6 +710,7 @@ class ModsView:
 
         self._installed_rebuild = lambda: populate(se.get_text())
         populate(refresh=True)
+        self._load_usage()
         se.connect("changed", lambda e: populate(e.get_text()))
         ub.connect("clicked", check_updates)
         scroll.set_child(self.inst_box); self.content.append(scroll)
@@ -726,10 +759,89 @@ class ModsView:
             row.set_selected(mid in self._selected_mod_ids)
         self._update_selection_label()
 
+    def _load_usage(self):
+        def work():
+            usage, unknown = favorite_mod_usage(refresh=True)
+            GLib.idle_add(apply, usage, unknown)
+
+        def apply(usage, unknown):
+            self._mod_usage, self._usage_unknown, self._usage_loaded = usage, unknown, True
+            for mid, row in self._mod_rows.items():
+                row.set_usage(usage.get(mid))
+            return False
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _prompt_remove_unused(self):
+        if not self._usage_loaded:
+            self.set_status("Still checking which mods your favourite servers use. Try again in a moment.")
+            return
+        if self._usage_unknown:
+            self.set_status(
+                "Can't tell which mods these favourites use, so nothing was removed: "
+                + ", ".join(self._usage_unknown[:3])
+                + ". They aren't answering. Try again when they're online, or unfavourite them.")
+            return
+        unused = [m for mid, m in self._installed_mod_map.items() if mid not in self._mod_usage]
+        if not unused:
+            self.set_status("Every installed mod is used by one of your favourite servers.")
+            return
+        win = transient_window(self.panel)
+        if not win:
+            return
+        d = Adw.MessageDialog(transient_for=win)
+        d.set_heading(f"Remove {len(unused)} unused mod(s)?")
+        names = "\n".join(m["name"] for m in unused[:12]) + ("\n…" if len(unused) > 12 else "")
+        d.set_body(
+            "These mods aren't used by any of your favourite servers. DZSL will unsubscribe from them in "
+            "Steam and delete their files:\n\n" + names
+            + "\n\nThis includes mods you subscribed to yourself. Favourite a server first if you want to keep its mods.")
+        d.add_response("cancel", "Cancel")
+        d.add_response("remove", "Remove")
+        d.set_response_appearance("remove", Adw.ResponseAppearance.DESTRUCTIVE)
+        d.set_default_response("cancel")
+        d.set_close_response("cancel")
+
+        def on_response(dialog, response):
+            dialog.destroy()
+            if response != "remove":
+                return
+            if not is_steam_running():
+                self.set_status("Steam is not running. Start Steam and try again.")
+                return
+            from dzsl.lifecycle import cancel_active_downloads
+            app = win.get_application()
+            if app:
+                cancel_active_downloads(app)
+            self.set_status(f"Removing {len(unused)} unused mod(s)…")
+
+            def work():
+                removed, error = unsubscribe_mod_ids([m["id"] for m in unused], self.cfg)
+                GLib.idle_add(
+                    self.set_status,
+                    f"Steam unsubscribe failed: {error}" if error else f"Removed {len(removed)} unused mod(s)")
+                if removed:
+                    GLib.idle_add(self._reload_installed)
+            threading.Thread(target=work, daemon=True).start()
+
+        d.connect("response", on_response)
+        d.present()
+
+    def _reload_installed(self):
+        if self._installed_rebuild:
+            self._show_tab("installed")
+        return False
+
     def _verify_selected_mods(self):
         selected = [self._installed_mod_map[mid] for mid in self._selected_mod_ids if mid in self._installed_mod_map]
         if not selected:
             self.set_status("Select at least one mod to verify.")
+            return
+        self._verify_mods(selected)
+
+    def _verify_mods(self, selected):
+        if not selected:
+            self.set_status("No mods installed.")
             return
         failed = 0
         for mod in selected:

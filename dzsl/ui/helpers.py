@@ -290,25 +290,39 @@ def mod_ids_from_server(server):
             ids.append(mid)
     return ids
 
-def favorite_mod_ids(exclude=None, refresh=False):
+_fav_mod_cache = {}
+
+
+def favorite_mod_usage(exclude=None, refresh=False):
     from dzsl.services.a2s import A2SError, query_mods
     query_ports = {}
     if refresh:
         from dzsl.ui.servers import _filter_state
         query_ports = {server_key(s): s.get("queryPort") for s in _filter_state.get("servers") or []}
-    keep = set()
+    usage = {}
+    unknown = []
     for fav in load_json(FAVS_FILE):
         key = server_key(fav)
         if exclude and key == exclude:
             continue
+        mods = fav.get("mods") or _fav_mod_cache.get(key)
         qport = fav.get("queryPort") or query_ports.get(key)
-        if refresh and not fav.get("mods") and qport:
+        if refresh and not mods and qport:
             try:
-                fav["mods"] = query_mods(key[0], qport, timeout=2)
+                mods = query_mods(key[0], qport, timeout=2)
+                _fav_mod_cache[key] = mods
             except (A2SError, OSError, ValueError):
                 pass
-        keep.update(mod_ids_from_server(fav))
-    return keep
+        if mods is None or (not mods and fav.get("modded")):
+            unknown.append(fav.get("name") or key[0])
+            continue
+        for mid in mod_ids_from_server({"mods": mods}):
+            usage.setdefault(mid, []).append(fav.get("name") or key[0])
+    return usage, unknown
+
+
+def favorite_mod_ids(exclude=None, refresh=False):
+    return set(favorite_mod_usage(exclude, refresh)[0])
 
 def subscribed_mod_ids_from_server(server, cfg=None):
     cfg = cfg or load_cfg()
