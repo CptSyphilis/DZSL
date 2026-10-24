@@ -83,6 +83,10 @@ def _base_url(value=None):
     return (value or os.environ.get("DAYZLINUX_BASE_URL") or DEFAULT_DAYZLINUX_BASE_URL).rstrip("/")
 
 
+def join_url(ip, port, base_url=None):
+    return f"{_base_url(base_url)}/servers/{ip}/{port}"
+
+
 def featured_listings(base_url=None, timeout=8, now=None):
     global _featured_cache, _featured_cache_at
     current = time.monotonic() if now is None else now

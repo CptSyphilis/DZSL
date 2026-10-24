@@ -2,7 +2,7 @@ import re
 import subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dzsl.core.uri import validate_host
-from dzsl.services.a2s import A2SError, query_info
+from dzsl.services.a2s import A2SError, query_info, query_mods
 
 
 def measure_ping(ip, timeout=1.5):
@@ -34,9 +34,17 @@ def _ping_server(server, ip):
     qport = server.get("queryPort")
     if qport:
         try:
-            return query_info(ip, qport, timeout=1.5)
+            info = query_info(ip, qport, timeout=1.5)
         except A2SError:
-            pass
+            server["no_response"] = True
+            return measure_ping(ip)
+        server["no_response"] = False
+        if server.get("modded") and not server.get("mods"):
+            try:
+                info["mods"] = query_mods(ip, qport, timeout=1.5)
+            except A2SError:
+                pass
+        return info
     return measure_ping(ip)
 
 
@@ -49,6 +57,7 @@ def ping_servers(servers, max_workers=16, limit=80):
         if not ip or key in seen:
             continue
         seen.add(key)
+        server["_pinged"] = True
         targets.append((server, ip))
         if len(targets) >= limit:
             break
@@ -68,5 +77,7 @@ def ping_servers(servers, max_workers=16, limit=80):
                 server["ping"] = result["ping"]
                 server["players"] = result["players"]
                 server["queue"] = result.get("queue", 0)
+                if result.get("mods"):
+                    server["mods"] = result["mods"]
             else:
                 server["ping"] = result

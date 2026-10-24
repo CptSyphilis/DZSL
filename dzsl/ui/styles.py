@@ -114,6 +114,8 @@ button:disabled { opacity: 0.42; box-shadow: none; }
 .tag-1pp  { background: #1a0d0d; color: #8a4a4a; }
 .tag-pass { background: #1a1a0d; color: #8a8a4a; }
 .tag-gold { background: rgba(216,173,104,0.12); color: #f0cf91; border: 1px solid rgba(216,173,104,0.48); }
+.tag-warn { background: #2a1a05; color: #f0b44c; border: 1px solid rgba(240,180,76,0.45); }
+.srv-no-response { opacity: 0.55; }
 
 /* Buttons */
 .btn-connect, .btn-success, .btn-info-active, .btn-steam {

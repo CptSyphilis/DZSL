@@ -191,14 +191,16 @@ def _unescape(data):
 
 
 def query_mods(host, port, timeout=_TIMEOUT):
-    # blob: ver u8, overflow u8, 2 DLC bytes, count u8, per mod: hash u32, id-width u8, id, name
+    # blob: ver u8, overflow u8, DLC flags u16 + one u32 per set flag, count u8, per mod: hash u32, id-width u8, id, name
     pairs = query_rules_raw(host, port, timeout)
     chunks = {k[0]: v for k, v in pairs if len(k) == 2 and k[0] <= k[1]}
     if not chunks:
         return []
     blob = _unescape(b"".join(chunks[i] for i in sorted(chunks)))
     r = _Reader(blob)
-    r.bytes(4)
+    r.bytes(2)
+    dlc_flags = int.from_bytes(r.bytes(2), "little")
+    r.bytes(4 * bin(dlc_flags).count("1"))
     count = r.u8()
     mods = []
     for _ in range(count):

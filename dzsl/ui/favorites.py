@@ -2,6 +2,8 @@ import gi
 gi.require_version('Gtk', '4.0')
 from gi.repository import Gtk, GLib
 import threading
+from dzsl.core.config import load_cfg
+from dzsl.services.dayz import installed_version
 from dzsl.ui.helpers import clear_box, recent_map
 from dzsl.ui.ping import ping_servers
 from dzsl.ui.server_row import ServerRow
@@ -79,12 +81,13 @@ class ListView:
             return
         self._refresh_from_feed(servers)
         played_lookup = recent_map()
+        local_version = installed_version(load_cfg())
         for s in servers:
             is_fav = any(f.get("ip") == s.get("ip") and f.get("port") == s.get("port") for f in self.favorites)
             box.append(ServerRow(
                 s, self.connect_cb, self.fav_cb, is_fav,
                 self.load_mods_cb, self.set_status, played_lookup=played_lookup,
-                expand_tracker=self._expand_tracker,
+                expand_tracker=self._expand_tracker, local_version=local_version,
             ))
         self._start_ping(servers)
 

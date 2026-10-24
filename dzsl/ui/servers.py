@@ -7,10 +7,11 @@ gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Gtk, GLib, Gdk, Adw
 import threading
-from dzsl.core.config import load_json, save_json, FILTERS_FILE
+from dzsl.core.config import load_json, save_json, FILTERS_FILE, HIDDEN_FILE
 from dzsl.core.environment import load_environment
 from dzsl.core.logging import get_logger
 from dzsl.paths import CONFIG_DIR, ENV_FILE
+from dzsl.services.dayz import cached_installed_version, installed_version
 from dzsl.services.listings import attach_featured_listings, featured_listings, pin_featured_servers
 from dzsl.services.server_api import DEFAULT_LIST_URL, fetch_servers
 from dzsl.ui.server_row import copy_text, popup_at_cursor, dismiss_popover, ServerRow
@@ -19,7 +20,7 @@ from dzsl.ui.helpers import (
     recent_map, normalize_map_name, server_key,
     build_map_filter_options, build_map_dropdown,
     is_map_filter_active, is_map_header_label, SORT_OPTIONS, parse_sort_mode,
-    sort_mode_for_key,
+    sort_mode_for_key, map_id, mod_count,
 )
 from dzsl.ui.ping import ping_servers
 
@@ -46,7 +47,12 @@ _filter_state = {
     "maps": ["Any"],
     "map_ids": [""],
     "sort_mode": "players_desc",
+    "max_ping": 0,
 }
+
+MAX_PING_OPTIONS = [(0, "Any"), (50, "50 ms"), (100, "100 ms"), (150, "150 ms"), (200, "200 ms"), (300, "300 ms")]
+# With a max ping set, unpinged servers are hidden; ping more of them in a few rounds of 80.
+MAX_PING_ROUNDS = 5
 
 # Load persisted filters from previous session
 try:
@@ -82,6 +88,10 @@ class ServersView:
         self._map_filter_debounce = None
         self._search_filter_debounce = None
         self._expand_tracker = [None]  # shared accordion state for ServerRow widgets
+        self._ping_rounds = 0
+        self.hidden = {
+            (h.get("ip"), int(h.get("port") or 0)) for h in load_json(HIDDEN_FILE) if isinstance(h, dict)
+        }
 
     def build(self):
         root = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
@@ -124,6 +134,14 @@ class ServersView:
         self.f_version = Gtk.DropDown.new_from_strings(_filter_state["versions"])
         fp.append(self.f_version)
 
+        ping_lbl = Gtk.Label(label="Max ping")
+        ping_lbl.add_css_class("filter-label")
+        ping_lbl.set_halign(Gtk.Align.START)
+        fp.append(ping_lbl)
+
+        self.f_ping = Gtk.DropDown.new_from_strings([label for _, label in MAX_PING_OPTIONS])
+        fp.append(self.f_ping)
+
         sort_lbl = Gtk.Label(label="Sort by")
         sort_lbl.add_css_class("filter-label")
         sort_lbl.set_halign(Gtk.Align.START)
@@ -140,10 +158,12 @@ class ServersView:
         for key, lbl in [
             ("noplayed", "Not played on"),
             ("nopass", "Not password protected"),
-            ("nomodded", "Not modded only"),
+            ("nomodded", "Vanilla only (no mods)"),
             ("firstperson", "FPP (First Person Perspective)"),
             ("thirdperson", "TPP (Third Person Perspective)"),
-            ("online", "Is online"),
+            ("online", "Has players"),
+            ("sameversion", "Same version only"),
+            ("showhidden", "Show hidden"),
         ]:
             cb = Gtk.CheckButton(label=lbl)
             cb.add_css_class("filter-check")
@@ -194,6 +214,7 @@ class ServersView:
         col_hdr.append(col_btn("TIME", "time", 72))
         col_hdr.append(col_btn("PLAYED", "played", 90))
         col_hdr.append(col_btn("MAP", "map", 100))
+        col_hdr.append(col_btn("MODS", "mods", 52))
         col_hdr.append(col_btn("PLAYERS", "players", 72))
         col_hdr.append(col_btn("PING", "ping", 52))
 
@@ -228,6 +249,8 @@ class ServersView:
             self.f_map.set_selected(_filter_state["map"])
         if _filter_state.get("version"):
             self.f_version.set_selected(min(_filter_state["version"], len(_filter_state["versions"]) - 1))
+        if _filter_state.get("max_ping"):
+            self.f_ping.set_selected(min(_filter_state["max_ping"], len(MAX_PING_OPTIONS) - 1))
 
         sort_modes = [mode for mode, _ in SORT_OPTIONS]
         if hasattr(self, "f_sort") and self.sort_mode in sort_modes:
@@ -241,9 +264,11 @@ class ServersView:
         self.ip_search.connect("changed", lambda *a: self._schedule_search_filter())
         self.f_map.connect("notify::selected", self._on_map_selected)
         self.f_version.connect("notify::selected", lambda *a: self._save_and_filter())
+        self.f_ping.connect("notify::selected", lambda *a: self._save_and_filter())
         self.f_sort.connect("notify::selected", self._on_sort_selected)
 
         self._update_sort_header_labels()
+        threading.Thread(target=self._load_version_thread, daemon=True).start()
 
         if self.all_servers:
             self._update_map_filter()
@@ -252,6 +277,23 @@ class ServersView:
         else:
             threading.Thread(target=self._load_cache_thread, daemon=True).start()
             self.fetch()
+
+    def _load_version_thread(self):
+        before = cached_installed_version()
+        if installed_version(self.cfg) != before:
+            GLib.idle_add(self.apply_filters)
+
+    def _set_hidden(self, server, hide):
+        ip, port = server_key(server)
+        key = (ip, int(port or 0))
+        if hide:
+            self.hidden.add(key)
+            self.set_status(f"Hidden {server.get('name', ip)}. Tick Show hidden to see it again.")
+        else:
+            self.hidden.discard(key)
+            self.set_status(f"Unhidden {server.get('name', ip)}")
+        save_json(HIDDEN_FILE, [{"ip": h_ip, "port": h_port} for h_ip, h_port in sorted(self.hidden)])
+        self.apply_filters()
 
     def _on_map_selected(self, *_args):
         if self._suppress_map_notify:
@@ -404,7 +446,7 @@ class ServersView:
             return
         labels = {
             "name": "NAME", "time": "TIME", "played": "PLAYED",
-            "map": "MAP", "players": "PLAYERS", "ping": "PING",
+            "map": "MAP", "players": "PLAYERS", "ping": "PING", "mods": "MODS",
         }
         for key, btn in self.col_btns.items():
             text = labels.get(key, key.upper())
@@ -437,6 +479,7 @@ class ServersView:
         self.ip_search.set_text("")
         self.f_map.set_selected(0)
         self.f_version.set_selected(0)
+        self.f_ping.set_selected(0)
         self.sort_mode = "players_desc"
         _filter_state["sort_mode"] = self.sort_mode
         self.sort_key, self.sort_rev = parse_sort_mode(self.sort_mode)
@@ -454,6 +497,7 @@ class ServersView:
         _filter_state["ip_search"] = self.ip_search.get_text()
         _filter_state["map"] = self.f_map.get_selected()
         _filter_state["version"] = self.f_version.get_selected()
+        _filter_state["max_ping"] = self.f_ping.get_selected()
         _filter_state["checks"] = {k: v.get_active() for k, v in self.chk.items()}
 
         # Save the actual map ID (much more reliable)
@@ -473,6 +517,7 @@ class ServersView:
                 "map": _filter_state.get("map", 0),
                 "saved_map_id": _filter_state.get("saved_map_id", ""),
                 "version": _filter_state.get("version", 0),
+                "max_ping": _filter_state.get("max_ping", 0),
                 "checks": _filter_state.get("checks", {}),
                 "sort_mode": _filter_state.get("sort_mode", "players_desc"),
             })
@@ -600,7 +645,9 @@ class ServersView:
             log.error("Failed to fetch server list: %s", e)
             GLib.idle_add(self._fetch_done, f"Failed to load servers: {e}")
 
-    def apply_filters(self):
+    def apply_filters(self, from_ping=False):
+        if not from_ping:
+            self._ping_rounds = 0
         q = self.search.get_text().lower() if hasattr(self, "search") else ""
         iq = self.ip_search.get_text().strip() if hasattr(self, "ip_search") else ""
         mi = self.f_map.get_selected()
@@ -609,6 +656,12 @@ class ServersView:
         played_lookup = recent_map()
         played_ips = set(played_lookup.keys())
         versions = _filter_state.get("versions", ["Any"])
+        pi = self.f_ping.get_selected() if hasattr(self, "f_ping") else 0
+        max_ping = MAX_PING_OPTIONS[pi][0] if 0 <= pi < len(MAX_PING_OPTIONS) else 0
+        local_version = cached_installed_version()
+        show_hidden = self.chk["showhidden"].get_active()
+        same_version = self.chk["sameversion"].get_active() and bool(local_version)
+        unpinged = []
         out = []
         for s in self.all_servers:
             nm = s.get("name", "").lower()
@@ -620,7 +673,8 @@ class ServersView:
             ip = s.get("ip") or s.get("endpoint", {}).get("ip", "")
             port = s.get("port") or s.get("gamePort") or s.get("endpoint", {}).get("port", 0)
             key = (ip, port)
-            is_fav = key in fav_ips
+            if not show_hidden and (ip, int(port or 0)) in self.hidden:
+                continue
             if q and q not in nm and q not in mp:
                 continue
             if iq and iq not in ip:
@@ -629,7 +683,7 @@ class ServersView:
                 map_ids = _filter_state.get("map_ids", [])
                 if mi < len(map_ids):
                     mid = map_ids[mi]
-                    if is_map_filter_active(mid) and mp != mid:
+                    if is_map_filter_active(mid) and map_id(mp) != mid:
                         continue
             if vi > 0 and vi < len(versions):
                 if not s.get("version", "").startswith(versions[vi]):
@@ -646,6 +700,14 @@ class ServersView:
                 continue
             if self.chk["online"].get_active() and pl == 0:
                 continue
+            if same_version and s.get("version") != local_version:
+                continue
+            if max_ping:
+                if not s.get("_pinged"):
+                    unpinged.append(s)
+                    continue
+                if s.get("ping") is None or s["ping"] > max_ping:
+                    continue
             out.append(s)
 
         self.sort_key, self.sort_rev = parse_sort_mode(self.sort_mode)
@@ -665,14 +727,18 @@ class ServersView:
                 return played_lookup.get(server_key(s), 0)
             if self.sort_key == "version":
                 return s.get("version") or ""
+            if self.sort_key == "mods":
+                count = mod_count(s)
+                return 0.5 if count is None else count
             return 0
 
         out.sort(key=sort_val, reverse=self.sort_rev)
+        unpinged.sort(key=sort_val, reverse=self.sort_rev)
 
         # When no filters narrow the list, float favourites to the top
         # (stable sort preserves the chosen sort order within each group).
         no_filters_active = (
-            not q and not iq and mi == 0 and vi == 0
+            not q and not iq and mi == 0 and vi == 0 and not max_ping
             and not any(cb.get_active() for cb in self.chk.values())
         )
         if no_filters_active and fav_ips:
@@ -699,24 +765,34 @@ class ServersView:
                 self.srv_box.append(ServerRow(
                     s, self.connect_cb, self.fav_cb, (ip, port) in fav_ips,
                     self.load_mods_cb, self.set_status, played_lookup=played_lookup,
-                    expand_tracker=self._expand_tracker))
+                    expand_tracker=self._expand_tracker, local_version=local_version,
+                    on_hide=self._set_hidden, is_hidden=(ip, int(port or 0)) in self.hidden))
         gold_count = sum(1 for server in visible if "_gold_listing" in server)
         gold_status = f" · {gold_count} Gold" if gold_count else ""
-        self.set_status(f"Showing {len(visible):,} of {len(self.all_servers):,} servers{gold_status}")
-        self._start_ping(visible[:80])
+        pinging = " · checking ping on more servers…" if max_ping and unpinged and self._ping_rounds < MAX_PING_ROUNDS else ""
+        self.set_status(f"Showing {len(visible):,} of {len(self.all_servers):,} servers{gold_status}{pinging}")
+        if pinging:
+            self._ping_rounds += 1
+            self._start_ping(unpinged[:80], refilter=True)
+        else:
+            self._start_ping(visible[:80])
 
-    def _start_ping(self, servers):
+    def _start_ping(self, servers, refilter=False):
         self._ping_generation += 1
         generation = self._ping_generation
         threading.Thread(
             target=self._ping_batch,
-            args=(servers, generation),
+            args=(servers, generation, refilter),
             daemon=True,
         ).start()
 
-    def _ping_batch(self, servers, generation):
+    def _ping_batch(self, servers, generation, refilter=False):
         ping_servers(servers)
-        if generation == self._ping_generation:
+        if generation != self._ping_generation:
+            return
+        if refilter:
+            GLib.idle_add(self.apply_filters, True)
+        else:
             GLib.idle_add(self._refresh_pings)
 
     def _refresh_pings(self):

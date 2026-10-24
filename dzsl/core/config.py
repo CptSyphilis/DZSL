@@ -20,6 +20,7 @@ CONFIG_FILE = os.path.join(CONFIG_DIR, "config.json")
 FAVS_FILE = os.path.join(CONFIG_DIR, "favorites.json")
 RECENT_FILE = os.path.join(CONFIG_DIR, "recent.json")
 FILTERS_FILE = os.path.join(CONFIG_DIR, "filters.json")
+HIDDEN_FILE = os.path.join(CONFIG_DIR, "hidden.json")
 
 os.makedirs(CONFIG_DIR, mode=0o700, exist_ok=True)
 try:

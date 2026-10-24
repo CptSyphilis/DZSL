@@ -1,8 +1,9 @@
 import os
+import re
 import subprocess
 import threading
 import time
-from dzsl.core.config import load_json, load_cfg, mod_subscribed, is_steam_running, RECENT_FILE
+from dzsl.core.config import load_json, load_cfg, mod_subscribed, is_steam_running, FAVS_FILE, RECENT_FILE
 from dzsl.runtime import is_flatpak, open_external_uri
 
 def transient_window(widget):
@@ -79,6 +80,22 @@ def server_tags(server):
         tags.append("No BE")
     return tags
 
+def mod_count(server):
+    mods = server.get("mods")
+    if mods:
+        return len(filter_server_mods(mods))
+    if server.get("modded"):
+        return None
+    return 0
+
+def format_mod_count(server):
+    count = mod_count(server)
+    return "?" if count is None else str(count)
+
+def server_version_mismatch(server, local_version):
+    ver = server.get("version") or ""
+    return bool(local_version and ver and ver != local_version)
+
 def format_server_subtitle(server):
     ip = server.get("ip") or server.get("endpoint", {}).get("ip", "?")
     port = server.get("port") or server.get("gamePort") or server.get("endpoint", {}).get("port", 2302)
@@ -90,6 +107,7 @@ _MAP_NAMES = {
     "chernarus2035": "Chernarus 2035",
     "chernarus": "Chernarus",
     "namalsk": "Namalsk",
+    "nasdara": "Nasdara",
     "enoch": "Livonia",
     "livonia": "Livonia",
     "deerisle": "Deer Isle",
@@ -169,10 +187,15 @@ OFFICIAL_MAP_IDS = {
     "enoch",
     "livonia",
     "sakhal",
+    "nasdara",
 }
 
 def _map_key(raw):
     return (raw or "").strip().lower().replace(" ", "").replace("_", "")
+
+# Servers spell one map several ways ("nasdara", "Nasdara", "{Nasdara}"); group them.
+def map_id(raw):
+    return re.sub(r"[\W_]+", "", (raw or "").lower())
 
 def is_official_map(map_id):
     return _map_key(map_id) in OFFICIAL_MAP_IDS
@@ -194,6 +217,8 @@ SORT_OPTIONS = [
     ("time_asc", "In-game time"),
     ("played_desc", "Recently played"),
     ("version_desc", "Version (newest)"),
+    ("mods_desc", "Mods (most first)"),
+    ("mods_asc", "Mods (fewest first)"),
 ]
 
 def parse_sort_mode(mode):
@@ -208,6 +233,8 @@ def parse_sort_mode(mode):
         "time_asc": ("time", False),
         "played_desc": ("played", True),
         "version_desc": ("version", True),
+        "mods_desc": ("mods", True),
+        "mods_asc": ("mods", False),
     }
     return modes.get(mode, ("players", True))
 
@@ -222,7 +249,7 @@ def sort_mode_for_key(key, reverse):
 def build_map_filter_options(servers):
     counts = {}
     for s in servers or []:
-        mid = (s.get("map") or "").strip().lower()
+        mid = map_id(s.get("map"))
         if mid:
             counts[mid] = counts.get(mid, 0) + 1
 
@@ -262,6 +289,26 @@ def mod_ids_from_server(server):
             seen.add(mid)
             ids.append(mid)
     return ids
+
+def favorite_mod_ids(exclude=None, refresh=False):
+    from dzsl.services.a2s import A2SError, query_mods
+    query_ports = {}
+    if refresh:
+        from dzsl.ui.servers import _filter_state
+        query_ports = {server_key(s): s.get("queryPort") for s in _filter_state.get("servers") or []}
+    keep = set()
+    for fav in load_json(FAVS_FILE):
+        key = server_key(fav)
+        if exclude and key == exclude:
+            continue
+        qport = fav.get("queryPort") or query_ports.get(key)
+        if refresh and not fav.get("mods") and qport:
+            try:
+                fav["mods"] = query_mods(key[0], qport, timeout=2)
+            except (A2SError, OSError, ValueError):
+                pass
+        keep.update(mod_ids_from_server(fav))
+    return keep
 
 def subscribed_mod_ids_from_server(server, cfg=None):
     cfg = cfg or load_cfg()
@@ -348,6 +395,14 @@ def prompt_unsubscribe_server_mods(parent, server, set_status=None):
             set_status("You are not subscribed to any of this server's mods.")
         return
 
+    keep = favorite_mod_ids(exclude=server_key(server))
+    kept = [mid for mid in ids if mid in keep]
+    ids = [mid for mid in ids if mid not in keep]
+    if not ids:
+        if set_status:
+            set_status(f"Nothing to remove: your favourite servers use all {len(kept)} of this server's mods.")
+        return
+
     name = server.get("name", "This server")
     steam_up = is_steam_running()
 
@@ -360,8 +415,8 @@ def prompt_unsubscribe_server_mods(parent, server, set_status=None):
     d = Adw.MessageDialog(transient_for=win)
     d.set_heading("Unsubscribe server mods?")
     body = f"Unsubscribe from {len(ids)} subscribed workshop mod(s) for:\n{name}"
-    if len(ids) < len(all_ids):
-        body += f"\n\n({len(all_ids) - len(ids)} other server mod(s) are not subscribed.)"
+    if kept:
+        body += f"\n\nKeeping {len(kept)} mod(s) that your favourite servers also use."
     if steam_up:
         body += "\n\nRequires Steam to be running and logged in."
     else:
@@ -391,7 +446,12 @@ def prompt_unsubscribe_server_mods(parent, server, set_status=None):
             cancel_active_downloads(app)
 
         def work():
-            removed, error = unsubscribe_mod_ids(ids, cfg)
+            # Favourites saved without a mod list get asked now, so their mods stay too.
+            safe_ids = [mid for mid in ids if mid not in favorite_mod_ids(server_key(server), refresh=True)]
+            if not safe_ids:
+                GLib.idle_add(set_status or (lambda _m: None), "Nothing removed: your favourite servers use these mods.")
+                return
+            removed, error = unsubscribe_mod_ids(safe_ids, cfg)
             if set_status:
                 if error:
                     GLib.idle_add(set_status, f"Steam unsubscribe failed: {error}")

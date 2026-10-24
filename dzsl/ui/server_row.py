@@ -5,8 +5,11 @@ from gi.repository import Gtk, Gdk, GLib, Adw, Graphene
 import threading
 
 from dzsl.runtime import open_external_uri
-from dzsl.services.listings import fetch_banner
-from dzsl.ui.helpers import format_played, format_server_time, normalize_map_name, server_key, format_server_subtitle, server_tags
+from dzsl.services.listings import fetch_banner, join_url
+from dzsl.ui.helpers import (
+    format_mod_count, format_played, format_server_time, normalize_map_name, server_key,
+    format_server_subtitle, server_tags, server_version_mismatch,
+)
 
 def copy_text(text):
     Gdk.Display.get_default().get_clipboard().set(
@@ -54,7 +57,8 @@ def popup_at_cursor(popover, widget, x, y):
 
 class ServerRow(Gtk.Box):
     def __init__(self, server, on_connect, on_fav, is_fav=True, on_load_mods=None,
-                 set_status=None, played_lookup=None, expand_tracker=None):
+                 set_status=None, played_lookup=None, expand_tracker=None,
+                 local_version="", on_hide=None, is_hidden=False):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.add_css_class("table-row")
         self.server = server
@@ -64,6 +68,8 @@ class ServerRow(Gtk.Box):
         self.set_status = set_status or (lambda _msg: None)
         self.expanded = False
         self._a2s_done = False
+        self.on_hide = on_hide
+        self.is_hidden = is_hidden
         self.gold_listing = server.get("_gold_listing") or {}
         if self.gold_listing:
             self.add_css_class("gold-server")
@@ -102,6 +108,18 @@ class ServerRow(Gtk.Box):
             gold.add_css_class("tag")
             gold.add_css_class("tag-gold")
             top.append(gold)
+        if server_version_mismatch(server, local_version):
+            warn = Gtk.Label(label="⚠")
+            warn.add_css_class("tag")
+            warn.add_css_class("tag-warn")
+            warn.set_tooltip_text(
+                f"Runs DayZ {server.get('version')}, you have {local_version}. You can't join until both match.")
+            top.append(warn)
+        self.no_resp_tag = Gtk.Label(label="NO RESPONSE")
+        self.no_resp_tag.add_css_class("tag")
+        self.no_resp_tag.add_css_class("tag-pass")
+        self.no_resp_tag.set_tooltip_text("The server didn't answer. It may be offline or restarting.")
+        top.append(self.no_resp_tag)
         if pw:
             lock = Gtk.Label(label="🔒")
             lock.add_css_class("tag")
@@ -137,6 +155,12 @@ class ServerRow(Gtk.Box):
         map_lbl.set_halign(Gtk.Align.CENTER)
         self.main_row.append(map_lbl)
 
+        self.mods_lbl = Gtk.Label(label=format_mod_count(server))
+        self.mods_lbl.add_css_class("srv-detail")
+        self.mods_lbl.set_size_request(52, -1)
+        self.mods_lbl.set_halign(Gtk.Align.CENTER)
+        self.main_row.append(self.mods_lbl)
+
         self.pl_lbl = Gtk.Label(label=self._player_text())
         self.pl_lbl.add_css_class("srv-players")
         self.pl_lbl.set_size_request(72, -1)
@@ -167,6 +191,7 @@ class ServerRow(Gtk.Box):
         self.main_row.append(info_btn)
 
         self.append(self.main_row)
+        self._update_response()
 
         self.details = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         self.details.set_margin_start(40)
@@ -396,7 +421,17 @@ class ServerRow(Gtk.Box):
         queue = self.server.get("queue", 0)
         return f"{pl}/{mxp}" + (f" +{queue}" if queue else "")
 
+    def _update_response(self):
+        dead = bool(self.server.get("no_response"))
+        self.no_resp_tag.set_visible(dead)
+        if dead:
+            self.add_css_class("srv-no-response")
+        else:
+            self.remove_css_class("srv-no-response")
+
     def update_ping(self):
+        self._update_response()
+        self.mods_lbl.set_text(format_mod_count(self.server))
         self.pl_lbl.set_text(self._player_text())
         ping = self.server.get("ping")
         self.ping_lbl.set_text(self._ping_text(ping))
@@ -426,6 +461,8 @@ class ServerRow(Gtk.Box):
             ("Unsubscribe Server Mods", self._unsubscribe_mods),
             ("Toggle Favorite", lambda s: self.on_fav(self.server, None)),
             ("Copy IP:Port", self._copy_ip),
+            ("Copy Join Link", self._copy_join_link),
+            *([("Unhide Server" if self.is_hidden else "Hide Server", self._toggle_hidden)] if self.on_hide else []),
             ("Server Properties", self._show_properties),
         ]:
             btn = Gtk.Button(label=label)
@@ -437,7 +474,7 @@ class ServerRow(Gtk.Box):
 
     def _menu_action(self, popover, callback):
         def handler(_btn):
-            if callback in (self._copy_ip, self._show_properties):
+            if callback in (self._copy_ip, self._copy_join_link, self._toggle_hidden, self._show_properties):
                 callback()
             else:
                 callback(self.server)
@@ -458,6 +495,14 @@ class ServerRow(Gtk.Box):
         ip = self.server.get("ip") or self.server.get("endpoint", {}).get("ip", "")
         port = self.server.get("port") or self.server.get("gamePort", 2302)
         copy_text(f"{ip}:{port}")
+
+    def _copy_join_link(self):
+        ip, port = server_key(self.server)
+        copy_text(join_url(ip, port or 2302))
+        self.set_status("Join link copied. It opens the server's page, where players can launch it in DZSL.")
+
+    def _toggle_hidden(self):
+        self.on_hide(self.server, not self.is_hidden)
 
     def _show_properties(self):
         from dzsl.ui.server_properties import show_server_properties

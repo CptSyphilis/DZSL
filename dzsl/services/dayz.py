@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import os
+import re
 import shutil
 import subprocess
 from urllib.parse import quote
@@ -26,6 +27,35 @@ def mod_link_name(mod_id):
 def dayz_dir(cfg):
     root = steam_library_root(cfg.get("steam_root", ""))
     return os.path.join(root, "steamapps", "common", "DayZ")
+
+
+_version_cache = {"key": None, "version": ""}
+_PRODUCT_VERSION = re.compile(rb"P\0r\0o\0d\0u\0c\0t\0V\0e\0r\0s\0i\0o\0n\0(?:\0\0)+((?:[0-9.]\0)+)")
+
+
+# The exe's ProductVersion ("1.30.164200.56") matches the version servers report minus the last part.
+def installed_version(cfg):
+    exe = os.path.join(dayz_dir(cfg), "DayZ_x64.exe")
+    try:
+        key = (exe, os.path.getmtime(exe))
+    except OSError:
+        return ""
+    if _version_cache["key"] == key:
+        return _version_cache["version"]
+    version = ""
+    try:
+        with open(exe, "rb") as fh:
+            match = _PRODUCT_VERSION.search(fh.read())
+        if match:
+            version = ".".join(match.group(1).decode("utf-16-le").split(".")[:3])
+    except OSError:
+        pass
+    _version_cache.update(key=key, version=version)
+    return version
+
+
+def cached_installed_version():
+    return _version_cache["version"]
 
 
 def _find_mod_dir(cfg, mod_id):
