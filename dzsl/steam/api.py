@@ -153,6 +153,17 @@ class SteamWorkshopAPI:
             self._restore_app_environment()
 
 
+def _flatpak_app_path():
+    try:
+        with open("/.flatpak-info") as fh:
+            for line in fh:
+                if line.startswith("app-path="):
+                    return line.split("=", 1)[1].strip()
+    except OSError:
+        pass
+    return ""
+
+
 def run_workshop_helper(command, mod_ids=(), timeout=30):
     """Run a native Workshop call in a short-lived subprocess.
 
@@ -165,6 +176,9 @@ def run_workshop_helper(command, mod_ids=(), timeout=30):
     Returns (ok, error_text).
     """
     cmd = [sys.executable, "-m", "dzsl.steam.api", command]
+    app_path = _flatpak_app_path()
+    if app_path:
+        cmd = ["flatpak-spawn", "--host", f"--env=PYTHONPATH={app_path}/lib/dzsl", "python3", "-m", "dzsl.steam.api", command]
     cmd.extend(str(mid) for mid in mod_ids)
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
