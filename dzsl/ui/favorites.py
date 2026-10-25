@@ -70,6 +70,10 @@ class ListView:
             for key in ("queryPort", "players", "maxPlayers", "version", "time", "password"):
                 if fresh.get(key) is not None:
                     s[key] = fresh[key]
+            if s.get("name") == f"{s.get('ip')}:{s.get('port')}" and fresh.get("name"):
+                for key in ("name", "map", "modded", "firstPersonOnly"):
+                    if fresh.get(key) is not None:
+                        s[key] = fresh[key]
 
     def _populate(self, box, servers):
         clear_box(box)

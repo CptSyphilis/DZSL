@@ -5,14 +5,14 @@ from gi.repository import Gtk, GLib
 import threading
 from dzsl.core.config import save_json, FAVS_FILE
 from dzsl.core.uri import validate_host_port
-from dzsl.services.server_api import fetch_server
+from dzsl.services.server_api import fetch_server, fetch_servers
 
 class AddServerView:
-    def __init__(self, panel, favorites, set_status):
+    def __init__(self, panel, favorites, set_status, on_added=None):
         self.panel      = panel
         self.favorites  = favorites
         self.set_status = set_status
-        self._queried   = None
+        self.on_added   = on_added
 
     def build(self):
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL); outer.set_vexpand(True)
@@ -52,29 +52,8 @@ class AddServerView:
 
         self.res = Gtk.Label(label=""); self.res.add_css_class("status-txt"); box.append(self.res)
 
-        brow = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        qb = Gtk.Button(label="Query server"); qb.add_css_class("btn-ghost"); qb.connect("clicked", self._query); brow.append(qb)
-        ab = Gtk.Button(label="Add to Favorites"); ab.add_css_class("btn-connect"); ab.connect("clicked", self._add); brow.append(ab)
-        box.append(brow); outer.append(box); self.panel.append(outer)
-
-    def _query(self, b):
-        ip = self.ip_e.get_text().strip()
-        pt = self.pt_e.get_text().strip() or "2302"
-        try:
-            ip, pt_value = validate_host_port(ip, pt)
-        except ValueError as exc:
-            self.res.set_text(str(exc).capitalize() + ".")
-            return
-        self.res.set_text("Querying…")
-        def q():
-            try:
-                d = fetch_server(ip, pt_value, timeout=8)
-                self._queried = {"ip": ip, "port": pt_value, "name": d.get("name", f"{ip}:{pt_value}"), "map": d.get("map", "?"), "players": d.get("players", 0), "maxPlayers": d.get("maxPlayers", 0), "mods": d.get("mods", []), "firstPersonOnly": d.get("firstPersonOnly", False)}
-                GLib.idle_add(self.res.set_text, f"Found: {self._queried['name']}")
-            except (OSError, RuntimeError, ValueError):
-                self._queried = {"ip": ip, "port": pt_value, "name": self.nm_e.get_text() or f"{ip}:{pt_value}", "map": "?", "players": 0, "maxPlayers": 0, "mods": [], "firstPersonOnly": False}
-                GLib.idle_add(self.res.set_text, "Could not query — will save manually.")
-        threading.Thread(target=q, daemon=True).start()
+        self.add_btn = Gtk.Button(label="Add to Favorites"); self.add_btn.add_css_class("btn-connect"); self.add_btn.connect("clicked", self._add)
+        box.append(self.add_btn); outer.append(box); self.panel.append(outer)
 
     def _add(self, b):
         ip = self.ip_e.get_text().strip()
@@ -84,9 +63,40 @@ class AddServerView:
         except ValueError as exc:
             self.res.set_text(str(exc).capitalize() + ".")
             return
-        srv = self._queried or {"ip": ip, "port": pt_value, "name": self.nm_e.get_text() or f"{ip}:{pt_value}", "map": "?", "players": 0, "maxPlayers": 0, "mods": [], "firstPersonOnly": False}
-        if not any(f.get("ip") == ip and str(f.get("port")) == str(pt_value) for f in self.favorites):
+        if any(f.get("ip") == ip and str(f.get("port")) == str(pt_value) for f in self.favorites):
+            self.res.set_text("Already in Favorites.")
+            return
+        name = self.nm_e.get_text().strip()
+        self.add_btn.set_sensitive(False)
+        self.res.set_text("Looking up server…")
+        def q():
+            try:
+                srv = _lookup(ip, pt_value)
+            except (OSError, RuntimeError, ValueError):
+                srv = {"ip": ip, "port": pt_value, "name": f"{ip}:{pt_value}", "map": "?", "players": 0, "maxPlayers": 0, "mods": [], "firstPersonOnly": False}
+            if name and srv["name"] == f"{ip}:{pt_value}":
+                srv["name"] = name
+            GLib.idle_add(self._save, srv)
+        threading.Thread(target=q, daemon=True).start()
+
+    def _save(self, srv):
+        self.add_btn.set_sensitive(True)
+        if not any(f.get("ip") == srv["ip"] and str(f.get("port")) == str(srv["port"]) for f in self.favorites):
             self.favorites.append(srv); save_json(FAVS_FILE, self.favorites)
-            self.res.set_text("OK Added to Favorites"); self.set_status(f"Saved {srv['name']}")
+            self.set_status(f"Saved {srv['name']}")
+            if self.on_added:
+                self.on_added()
         else:
             self.res.set_text("Already in Favorites.")
+        return False
+
+
+def _lookup(ip, port):
+    from dzsl.ui.servers import _filter_state
+    rows = _filter_state.get("servers") or fetch_servers(timeout=10)
+    for s in rows:
+        s_ip = s.get("ip") or s.get("endpoint", {}).get("ip")
+        if s_ip == ip and str(s.get("gamePort") or s.get("port")) == str(port):
+            return dict(s, ip=ip, port=port)
+    d = fetch_server(ip, port, timeout=8)
+    return {"ip": ip, "port": port, "name": d.get("name", f"{ip}:{port}"), "map": d.get("map", "?"), "players": d.get("players", 0), "maxPlayers": d.get("maxPlayers", 0), "mods": d.get("mods", []), "firstPersonOnly": d.get("firstPersonOnly", False)}
