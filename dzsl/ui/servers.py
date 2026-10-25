@@ -751,6 +751,7 @@ class ServersView:
         out = pin_featured_servers(out)
 
         visible = out[:500]
+        self._row_gen = getattr(self, "_row_gen", 0) + 1
         clear_box(self.srv_box)
         self._expand_tracker[0] = None  # rows are being recreated, drop stale reference
         if not visible:
@@ -759,14 +760,25 @@ class ServersView:
             el.set_margin_top(60)
             self.srv_box.append(el)
         else:
-            for s in visible:
-                ip = s.get("ip") or s.get("endpoint", {}).get("ip", "")
-                port = s.get("port") or s.get("gamePort") or s.get("endpoint", {}).get("port", 0)
-                self.srv_box.append(ServerRow(
-                    s, self.connect_cb, self.fav_cb, (ip, port) in fav_ips,
-                    self.load_mods_cb, self.set_status, played_lookup=played_lookup,
-                    expand_tracker=self._expand_tracker, local_version=local_version,
-                    on_hide=self._set_hidden, is_hidden=(ip, int(port or 0)) in self.hidden))
+            self._row_gen = getattr(self, "_row_gen", 0) + 1
+            generation = self._row_gen
+
+            def add_rows(start, count):
+                if generation != self._row_gen:
+                    return False
+                for s in visible[start:start + count]:
+                    ip = s.get("ip") or s.get("endpoint", {}).get("ip", "")
+                    port = s.get("port") or s.get("gamePort") or s.get("endpoint", {}).get("port", 0)
+                    self.srv_box.append(ServerRow(
+                        s, self.connect_cb, self.fav_cb, (ip, port) in fav_ips,
+                        self.load_mods_cb, self.set_status, played_lookup=played_lookup,
+                        expand_tracker=self._expand_tracker, local_version=local_version,
+                        on_hide=self._set_hidden, is_hidden=(ip, int(port or 0)) in self.hidden))
+                if start + count < len(visible):
+                    GLib.idle_add(add_rows, start + count, 12, priority=GLib.PRIORITY_LOW)
+                return False
+
+            add_rows(0, 30)
         gold_count = sum(1 for server in visible if "_gold_listing" in server)
         gold_status = f" · {gold_count} Gold" if gold_count else ""
         pinging = " · checking ping on more servers…" if max_ping and unpinged and self._ping_rounds < MAX_PING_ROUNDS else ""

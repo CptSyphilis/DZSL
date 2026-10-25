@@ -615,6 +615,7 @@ class ModsView:
         def populate(q=None, refresh=False):
             nonlocal all_mods, validations, loaded
             q = se.get_text() if q is None else q
+            self._populate_gen = getattr(self, "_populate_gen", 0) + 1
             clear_box(self.inst_box)
             self._mod_rows = {}
             self._expanded_row = None
@@ -648,25 +649,39 @@ class ModsView:
             outdated = [m for m in mods if m["id"] in self._outdated_ids]
             current = [m for m in mods if m["id"] not in self._outdated_ids]
 
-            def append_section(label, section_mods, update_section=False):
-                if not section_mods:
-                    return
-                header = Gtk.Label(label=f"{label}  ·  {len(section_mods)}")
-                header.add_css_class("mod-section-header")
-                if update_section:
-                    header.add_css_class("mod-section-update")
-                header.set_halign(Gtk.Align.START)
-                self.inst_box.append(header)
-                for mod in section_mods:
-                    row = InstalledModRow(self, mod, lambda: populate(refresh=True), validations.get(mod["id"]))
-                    self._mod_rows[mod["id"]] = row
+            items = []
+            for label, section_mods, update_section in (
+                ("UPDATES AVAILABLE", outdated, True), ("INSTALLED MODS", current, False),
+            ):
+                if section_mods:
+                    items.append((f"{label}  ·  {len(section_mods)}", update_section))
+                    items.extend(section_mods)
+
+            generation = self._populate_gen = getattr(self, "_populate_gen", 0) + 1
+
+            def add_items(start, count):
+                if generation != self._populate_gen:
+                    return False
+                for item in items[start:start + count]:
+                    if isinstance(item, tuple):
+                        header = Gtk.Label(label=item[0])
+                        header.add_css_class("mod-section-header")
+                        if item[1]:
+                            header.add_css_class("mod-section-update")
+                        header.set_halign(Gtk.Align.START)
+                        self.inst_box.append(header)
+                        continue
+                    row = InstalledModRow(self, item, lambda: populate(refresh=True), validations.get(item["id"]))
+                    self._mod_rows[item["id"]] = row
                     self.inst_box.append(row)
-                    cached = self._details_cache.get(mod["id"])
+                    cached = self._details_cache.get(item["id"])
                     if cached:
                         row.apply_workshop_details(*cached)
+                if start + count < len(items):
+                    GLib.idle_add(add_items, start + count, 6, priority=GLib.PRIORITY_LOW)
+                return False
 
-            append_section("UPDATES AVAILABLE", outdated, True)
-            append_section("INSTALLED MODS", current)
+            add_items(0, 12)
             self._request_workshop_details([m["id"] for m in mods])
 
         def check_updates(b):
@@ -938,10 +953,18 @@ class ModsView:
             self._outdated_ids = current_outdated
             self._installed_rebuild()
             return False
-        for mid in ids:
-            row = self._mod_rows.get(mid)
-            if row:
-                row.apply_workshop_details(*result[mid])
+        pending = [mid for mid in ids if mid in self._mod_rows]
+
+        def apply_some(start):
+            for mid in pending[start:start + 6]:
+                row = self._mod_rows.get(mid)
+                if row:
+                    row.apply_workshop_details(*result[mid])
+            if start + 6 < len(pending):
+                GLib.idle_add(apply_some, start + 6, priority=GLib.PRIORITY_LOW)
+            return False
+
+        apply_some(0)
         return False
 
     @staticmethod
