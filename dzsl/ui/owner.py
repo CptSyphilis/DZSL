@@ -7,10 +7,13 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, GLib, Gtk
 
+from dzsl.core.config import load_cfg
 from dzsl.core.logging import get_logger
+from dzsl.core.uri import validate_host_port
 from dzsl.http import RequestError
 from dzsl.runtime import open_external_uri
 from dzsl.services import owner as owner_api
+from dzsl.services.check import check_server
 from dzsl.services.owner import TEXT_LIMITS, URL_LIMITS, dashboard_url
 from dzsl.ui.helpers import clear_box
 from dzsl.ui.owner_login import OwnerLoginWindow
@@ -135,6 +138,7 @@ class OwnerView:
 
     def _build_signed_out(self, message=None):
         outer = self._shell()
+        self._build_check(outer)
         body = self._card(outer, "SERVER OWNERS")
         if message:
             self._label(body, message)
@@ -160,6 +164,7 @@ class OwnerView:
 
     def _build_signed_in(self, session):
         outer = self._shell()
+        self._build_check(outer)
         account = self._card(outer, "ACCOUNT")
         persona = session.get("persona") or session.get("steamId") or "Steam user"
         self._label(account, f"Signed in as {persona}")
@@ -187,6 +192,92 @@ class OwnerView:
             GLib.idle_add(self._render_claims, token, items)
 
         threading.Thread(target=worker, daemon=True).start()
+
+    def _build_check(self, outer):
+        body = self._card(outer, "CHECK SERVER")
+        self._label(body, "See how Steam and DZSL see a server, and what to fix if players can't find or join it.", dim=True)
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        ip_e = self._entry(row, "SERVER IP", "", 64)
+        port_e = self._entry(row, "GAME PORT", "", 5)
+        port_e.get_parent().set_hexpand(False)
+        port_e.set_hexpand(False)
+        port_e.set_width_chars(7)
+        port_e.set_placeholder_text("2302")
+        body.append(row)
+        results = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        button = self._button_row(body, [("CHECK", "btn-connect", lambda: self._run_check(ip_e, port_e, results, button))]).get_first_child()
+        body.append(results)
+        ip_e.connect("activate", lambda _: self._run_check(ip_e, port_e, results, button))
+        port_e.connect("activate", lambda _: self._run_check(ip_e, port_e, results, button))
+
+    def _run_check(self, ip_e, port_e, results, button):
+        ip = ip_e.get_text().strip()
+        port = port_e.get_text().strip()
+        if ":" in ip and not port:
+            ip, port = ip.rsplit(":", 1)
+            ip_e.set_text(ip)
+            port_e.set_text(port)
+        try:
+            ip, port = validate_host_port(ip, port or "2302")
+        except ValueError as exc:
+            self._show_check(results, error=str(exc).capitalize() + ".")
+            return
+        button.set_sensitive(False)
+        self._show_check(results, error="Checking…")
+
+        def worker():
+            from dzsl.ui.servers import _filter_state
+            try:
+                report = check_server(load_cfg(), ip, int(port), _filter_state.get("servers"))
+            except (RequestError, OSError, ValueError) as exc:
+                GLib.idle_add(self._check_failed, exc, results, button)
+                return
+            GLib.idle_add(self._check_done, report, results, button)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _check_failed(self, exc, results, button):
+        button.set_sensitive(True)
+        log.warning("Server check failed: %s", exc)
+        self._show_check(results, error="Couldn't load the server list. Check your connection and try again.")
+        return False
+
+    def _check_done(self, report, results, button):
+        button.set_sensitive(True)
+        self._show_check(results, report=report)
+        return False
+
+    def _show_check(self, results, report=None, error=None):
+        clear_box(results)
+        if error:
+            self._label(results, error, dim=True)
+            return
+        srv = report.get("server")
+        if isinstance(srv, dict):
+            self._label(results, f"{srv.get('name', '')} — {srv.get('map', '')}, {srv.get('players', 0)}/{srv.get('maxPlayers', 0)} players, v{srv.get('version', '?')}")
+        marks = {"ok": ("✓", "mod-status-good"), "warn": ("!", "mod-status-warn"), "error": ("✕", "mod-status-bad")}
+        for item in report.get("results") or []:
+            if not isinstance(item, dict):
+                continue
+            mark, css = marks.get(item.get("level"), ("•", "dim-label"))
+            line = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+            icon = Gtk.Label(label=mark, valign=Gtk.Align.START)
+            icon.add_css_class("mod-status")
+            icon.add_css_class(css)
+            line.append(icon)
+            text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3, hexpand=True)
+            title = self._label(text, str(item.get("title", "")))
+            title.add_css_class(css)
+            if item.get("detail"):
+                self._label(text, str(item["detail"]), dim=True)
+            link = item.get("link")
+            if isinstance(link, dict) and str(link.get("url", "")).startswith("https://"):
+                b = Gtk.Button(label=str(link.get("label") or "Open"), halign=Gtk.Align.START)
+                b.add_css_class("btn-ghost")
+                b.connect("clicked", lambda _, u=link["url"]: open_external_uri(u))
+                text.append(b)
+            line.append(text)
+            results.append(line)
 
     def _claims_failed(self, exc):
         if getattr(exc, "status", None) == 401:
