@@ -176,6 +176,11 @@ def build_launch_command(server_address, mod_links, profile_name="", game_params
     return steam_launch_prefix() + ["-applaunch", str(appid)] + arguments
 
 
+def build_host_launch_command(server_address, mod_links, profile_name="", game_params=None, appid=DAYZ_APPID):
+    arguments = build_launch_arguments(server_address, mod_links, profile_name, game_params)
+    return ["flatpak-spawn", "--host", "steam", "-applaunch", str(appid)] + arguments
+
+
 def build_launch_arguments(server_address, mod_links, profile_name="", game_params=None):
     arguments = []
     if mod_links:

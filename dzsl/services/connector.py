@@ -11,7 +11,7 @@ from dzsl.core.logging import get_logger
 from dzsl.paths import ENV_FILE
 from dzsl.runtime import is_flatpak, open_external_uri
 from dzsl.services.dayz import (
-    EXPERIMENTAL_APPID, ModSetupError, build_launch_command, build_launch_uri,
+    EXPERIMENTAL_APPID, ModSetupError, build_host_launch_command, build_launch_command, build_launch_uri,
     experimental_state, installed_version, same_major, setup_mod_links,
 )
 from dzsl.services.launch_gate import launch_block_reason
@@ -351,13 +351,14 @@ class Connector:
                 ip = self._server_ip(server)
                 port = self._game_port(server)
                 profile = (self.cfg.get("profile_name") or "").strip()
-                uri = build_launch_uri(
-                    self._server_addr(ip, port),
-                    mod_links,
-                    profile,
-                    self._game_params(password),
-                    appid=self._appid,
-                )
+                args = (self._server_addr(ip, port), mod_links, profile, self._game_params(password))
+                cmd = build_host_launch_command(*args, appid=self._appid)
+                try:
+                    if subprocess.run(cmd, capture_output=True, timeout=20).returncode == 0:
+                        return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+                except (OSError, subprocess.TimeoutExpired):
+                    pass
+                uri = build_launch_uri(*args, appid=self._appid)
                 if open_external_uri(uri):
                     return subprocess.CompletedProcess(args=[uri], returncode=0, stdout="", stderr="")
                 return subprocess.CompletedProcess(
