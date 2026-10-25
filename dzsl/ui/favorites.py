@@ -64,7 +64,7 @@ class ListView:
             if ip and port:
                 live[(ip, str(port))] = s
         for s in servers:
-            fresh = live.get((s.get("ip"), str(s.get("port") or s.get("gamePort") or "")))
+            fresh = live.get((s.get("ip") or s.get("endpoint", {}).get("ip"), str(s.get("gamePort") or s.get("port") or "")))
             if not fresh:
                 continue
             for key in ("queryPort", "players", "maxPlayers", "version", "time", "password"):
