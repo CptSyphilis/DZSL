@@ -109,8 +109,6 @@ class SteamSubscriptionManager:
     def subscribe_mod_steam(self, mod_id, mod_name=None):
         mid = str(mod_id)
         log.info("Queueing through Steam: %s (%s)", mod_name or mid, mid)
-        if is_flatpak():
-            return self.forward_steam_uri(f"steam://installworkshop/221100/{mid}")
         return self._queue_native(mid, mod_name)
 
     def _queue_native(self, mod_id, mod_name=None):
@@ -134,8 +132,6 @@ class SteamSubscriptionManager:
         return False
 
     def suspend_downloads(self):
-        if is_flatpak():
-            return False
         ok, error = run_workshop_helper("suspend")
         if not ok and error:
             log.error("Could not suspend Workshop downloads: %s", error)
@@ -148,8 +144,6 @@ class SteamSubscriptionManager:
         ids = [str(mid) for mid in mod_ids or []]
         if not ids:
             return True
-        if is_flatpak():
-            return False
         ok, error = run_workshop_helper("unsubscribe", ids)
         if not ok and error:
             log.error("Could not cancel Workshop downloads: %s", error)
