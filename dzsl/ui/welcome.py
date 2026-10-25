@@ -4,7 +4,7 @@ import threading
 import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
-from gi.repository import Adw, GLib, Gtk
+from gi.repository import GLib, Gtk
 
 from dzsl.core.config import RECENT_FILE, VERSION, load_cfg, load_json
 from dzsl.http import RequestError
@@ -94,10 +94,6 @@ class WelcomeView:
         vanilla.add_css_class("welcome-secondary")
         vanilla.connect("clicked", self._play_without_mods)
         row.append(vanilla)
-        news = Gtk.Button(label="What's new")
-        news.add_css_class("welcome-secondary")
-        news.connect("clicked", lambda _: self._show_changelog())
-        row.append(news)
         vbox.append(row)
 
         # ── Stat line ──
@@ -120,6 +116,7 @@ class WelcomeView:
 
         scrim.append(vbox)
         overlay.add_overlay(scrim)
+        overlay.add_overlay(self._build_news())
 
         # ── Version footer (bottom-right corner) ──
         ver = Gtk.Label(label=f"v{VERSION}")
@@ -161,31 +158,47 @@ class WelcomeView:
 
     def _changelog_loaded(self, entries):
         self.changelog = entries
+        self._fill_news()
         notice = next((e for e in entries or [] if e.get("notice")), None)
         if notice:
             self.notice.set_text(f"NOTICE  ·  {notice['text']}")
             self.notice.set_visible(True)
         return False
 
-    def _show_changelog(self):
-        dlg = Adw.Dialog()
-        dlg.set_title("What's new")
-        dlg.set_content_width(520)
-        dlg.set_content_height(520)
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        box.append(Adw.HeaderBar())
+    def _build_news(self):
+        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        card.add_css_class("welcome-news")
+        card.set_size_request(320, 320)
+        card.set_halign(Gtk.Align.START)
+        card.set_valign(Gtk.Align.CENTER)
+        card.set_margin_start(32)
+        head = Gtk.Label(label="WHAT'S NEW")
+        head.add_css_class("welcome-resume-eyebrow")
+        head.set_halign(Gtk.Align.START)
+        card.append(head)
         scroll = Gtk.ScrolledWindow()
         scroll.set_vexpand(True)
         scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        body.set_margin_start(20)
-        body.set_margin_end(20)
-        body.set_margin_bottom(20)
+        self.news_body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        loading = Gtk.Label(label="Loading…")
+        loading.add_css_class("changelog-item")
+        loading.set_xalign(0)
+        self.news_body.append(loading)
+        scroll.set_child(self.news_body)
+        card.append(scroll)
+        return card
+
+    def _fill_news(self):
+        body = self.news_body
+        while child := body.get_first_child():
+            body.remove(child)
         if self.changelog is None:
-            msg = Gtk.Label(label="Couldn't load the changelog. Check your connection and try again.")
+            msg = Gtk.Label(label="Couldn't load the changelog. Check your connection.")
             msg.set_wrap(True)
+            msg.set_xalign(0)
+            msg.add_css_class("changelog-item")
             body.append(msg)
-        for entry in self.changelog or []:
+        for i, entry in enumerate(self.changelog or []):
             if entry.get("notice"):
                 head = Gtk.Label(label=f"NOTICE  ·  {entry['date']}" if entry["date"] else "NOTICE")
                 head.add_css_class("changelog-notice")
@@ -195,7 +208,8 @@ class WelcomeView:
                 head.add_css_class("changelog-version")
                 lines = [f"•  {item}" for item in entry["items"]]
             head.set_halign(Gtk.Align.START)
-            head.set_margin_top(12)
+            if i:
+                head.set_margin_top(10)
             body.append(head)
             for line in lines:
                 lbl = Gtk.Label(label=line)
@@ -203,10 +217,6 @@ class WelcomeView:
                 lbl.set_xalign(0)
                 lbl.add_css_class("changelog-item")
                 body.append(lbl)
-        scroll.set_child(body)
-        box.append(scroll)
-        dlg.set_child(box)
-        dlg.present(self.panel.get_root())
 
     def _build_resume_card(self, server):
         name = server.get("name", "Unknown server")

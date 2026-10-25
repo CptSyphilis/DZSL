@@ -61,6 +61,9 @@ button:disabled { opacity: 0.42; box-shadow: none; }
 .changelog-version { color: #83bfc5; font-weight: 700; letter-spacing: 1px; }
 .changelog-notice { color: #f0b44c; font-weight: 700; letter-spacing: 1px; }
 .changelog-item { color: #c9d4dc; font-size: 13px; }
+.welcome-news { background: linear-gradient(160deg, rgba(10,24,29,0.86), rgba(25,20,45,0.88), rgba(37,17,36,0.80));
+                border: 1px solid rgba(177,140,255,0.40); border-radius: 4px; padding: 16px;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.5); }
 .welcome-title { font-size: 72px; font-weight: 400; letter-spacing: 2px;
                  font-family: "Black Ops One", sans-serif;
                  text-shadow: 0 0 18px rgba(124,108,255,0.22), 0 2px 12px rgba(0,0,0,0.9); }
