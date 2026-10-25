@@ -1,14 +1,16 @@
 import os
 import re
+import shlex
+import subprocess
 
 from dzsl.core.config import get_installed_mods, workshop_acf_paths
 from dzsl.core.constants import VERSION
-from dzsl.http import get_json, get_text
+from dzsl.http import download_file, get_json
 from dzsl.services.listings import _base_url
 from dzsl.steam.web_api import published_file_details
 from dzsl.steam.workshop import item_record
 
-REMOTE_VERSION_URL = "https://raw.githubusercontent.com/CptSyphilis/DZSL/main/dzsl/core/constants.py"
+APP_ID = "com.dayzlinux.dzsl"
 
 
 def outdated_mods(cfg, timeout=15):
@@ -42,14 +44,47 @@ def _version_tuple(value):
 
 
 def app_update_available(timeout=8):
-    text = get_text(REMOTE_VERSION_URL, timeout=timeout)
-    match = re.search(r'VERSION\s*=\s*"([^"]+)"', text)
-    if not match:
-        return None
-    remote = match.group(1)
-    if _version_tuple(remote) > _version_tuple(VERSION):
-        return remote
+    data = get_json(f"{_base_url()}/version.json", timeout=timeout)
+    remote = str(data.get("version") or "") if isinstance(data, dict) else ""
+    if remote and _version_tuple(remote) > _version_tuple(VERSION):
+        return {"version": remote, "force": bool(data.get("force"))}
     return None
+
+
+def _cache_dir():
+    path = os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "dzsl")
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def update_failed():
+    marker = os.path.join(_cache_dir(), "update-failed")
+    if os.path.exists(marker):
+        os.remove(marker)
+        return True
+    return False
+
+
+def download_app_update(progress=None):
+    dest = os.path.join(_cache_dir(), "dzsl-update.flatpak")
+    download_file(f"{_base_url()}/download/dzsl.flatpak", dest, progress, timeout=60)
+    return dest
+
+
+def install_app_update_and_restart(bundle):
+    cache = _cache_dir()
+    q = shlex.quote
+    script = (
+        f"sleep 2; "
+        f"flatpak install --user -y --noninteractive --reinstall --bundle {q(bundle)} >{q(cache + '/update.log')} 2>&1 "
+        f"|| touch {q(cache + '/update-failed')}; "
+        f"rm -f {q(bundle)}; "
+        f"flatpak run {APP_ID}"
+    )
+    subprocess.Popen(
+        ["flatpak-spawn", "--host", "setsid", "sh", "-c", script],
+        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
 
 
 # Release notes for this version and older, plus operator notices, newest first.

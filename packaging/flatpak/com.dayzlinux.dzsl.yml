@@ -16,6 +16,7 @@ finish-args:
   - --filesystem=/mnt
   - --filesystem=/media
   - --filesystem=/run/media
+  - --talk-name=org.freedesktop.Flatpak
 
 cleanup:
   - /lib/dzsl/tests

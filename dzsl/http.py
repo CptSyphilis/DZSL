@@ -115,3 +115,20 @@ def post_form_json(url, data, headers=None, timeout=30):
 
 def request_json(url, method="GET", json_body=None, headers=None, timeout=30):
     return _json_request(url, method=method, json_body=json_body, headers=headers, timeout=timeout)
+
+
+def download_file(url, dest, progress=None, timeout=30):
+    request = Request(url)
+    try:
+        with _opener.open(request, timeout=timeout) as response, open(dest, "wb") as out:  # nosec B310
+            total = int(response.headers.get("Content-Length") or 0)
+            done = 0
+            while chunk := response.read(1 << 16):
+                out.write(chunk)
+                done += len(chunk)
+                if progress and total:
+                    progress(done / total)
+    except HTTPError as exc:
+        raise RequestError(str(exc), status=exc.code) from exc
+    except (URLError, OSError, ValueError) as exc:
+        raise RequestError(str(exc)) from exc

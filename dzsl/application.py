@@ -10,7 +10,8 @@ load_bundled_fonts()
 import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
-from gi.repository import Gtk, Adw, GLib, Gdk, Gio
+gi.require_version('Graphene', '1.0')
+from gi.repository import Gtk, Adw, GLib, Gdk, Gio, Graphene
 import threading, subprocess, time
 
 from dzsl.core.config import load_cfg, save_cfg, save_json, load_json, FAVS_FILE, RECENT_FILE, VERSION
@@ -21,7 +22,8 @@ from dzsl.lifecycle import cancel_active_downloads
 from dzsl.paths import ASSETS_DIR
 from dzsl.services.connector import Connector
 from dzsl.services.server_api import fetch_server
-from dzsl.services.updates import app_update_available, outdated_mods
+from dzsl.runtime import is_flatpak
+from dzsl.services.updates import app_update_available, download_app_update, install_app_update_and_restart, outdated_mods, update_failed
 from dzsl.steam.login import steam_login_account
 from dzsl.ui.add_server import AddServerView
 from dzsl.ui.branding import DZSL_WORDMARK
@@ -204,6 +206,37 @@ class DZSL(Adw.Application):
 
     def _splash_checks(self):
         started = time.monotonic()
+        self.splash.set_step("Checking for DZSL updates…")
+        update = None
+        try:
+            update = app_update_available()
+        except Exception as exc:
+            log.warning("DZSL update check failed: %s", exc)
+        failed = is_flatpak() and update_failed()
+        if update and is_flatpak() and not failed:
+            if update["force"]:
+                self._apply_update()
+                return
+            GLib.idle_add(
+                self.splash.ask_update, update["version"],
+                lambda: threading.Thread(target=self._apply_update, daemon=True).start(),
+                lambda: threading.Thread(target=self._splash_rest, args=(started, update, False), daemon=True).start(),
+            )
+            return
+        self._splash_rest(started, update, failed)
+
+    def _apply_update(self):
+        try:
+            bundle = download_app_update(lambda f: self.splash.set_step(f"Downloading update… {int(f * 100)}%"))
+        except Exception as exc:
+            log.warning("DZSL update download failed: %s", exc)
+            self._splash_rest(time.monotonic(), None, True)
+            return
+        self.splash.set_step("Installing update — DZSL will restart")
+        install_app_update_and_restart(bundle)
+        GLib.idle_add(self.quit)
+
+    def _splash_rest(self, started, update, failed):
         self.splash.set_step("Checking Steam sign-in…")
         account = steam_login_account()
 
@@ -214,26 +247,21 @@ class DZSL(Adw.Application):
         except Exception as exc:
             log.warning("Mod update check failed: %s", exc)
 
-        self.splash.set_step("Checking for DZSL updates…")
-        new_version = None
-        try:
-            new_version = app_update_available()
-        except Exception as exc:
-            log.warning("DZSL update check failed: %s", exc)
-
         remaining = 5 - (time.monotonic() - started)
         if remaining > 0:
             self.splash.set_step("Ready")
             time.sleep(remaining)
-        GLib.idle_add(self._splash_done, account, stale, new_version)
+        GLib.idle_add(self._splash_done, account, stale, update, failed)
 
-    def _splash_done(self, account, stale, new_version):
+    def _splash_done(self, account, stale, update, failed):
         self.splash.destroy()
         self.splash = None
         self.win.present()
         self._on_initial_steam_check(account)
-        if new_version:
-            self.set_status(f"DZSL {new_version} is available (you have {VERSION})")
+        if failed:
+            self.set_status("DZSL update failed — download it from dayzlinux.com")
+        elif update:
+            self.set_status(f"DZSL {update['version']} is available (you have {VERSION})")
         if stale:
             self._show_mod_update_dialog(stale)
         return False
@@ -499,8 +527,21 @@ class DZSL(Adw.Application):
         dlg.set_content_width(420)
         dlg.set_content_height(380)
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        AddServerView(box, self.favorites, self.set_status).build()
+        def added():
+            dlg.close()
+            if self.current_view == "favorites":
+                self.show_view("favorites")
+        AddServerView(box, self.favorites, self.set_status, on_added=added).build()
         dlg.set_child(box)
+        outside = Gtk.GestureClick()
+        outside.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        def on_press(_g, _n, x, y):
+            ok, bounds = box.compute_bounds(self.win)
+            if ok and not bounds.contains_point(Graphene.Point().init(x, y)):
+                dlg.close()
+        outside.connect("pressed", on_press)
+        self.win.add_controller(outside)
+        dlg.connect("closed", lambda _d: self.win.remove_controller(outside))
         dlg.present(self.win)
 
     def _on_close_request(self, win):
