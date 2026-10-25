@@ -70,7 +70,7 @@ class ServersView:
         self.favorites = favorites
         self.connect_cb = connect_cb
         self.fav_cb = fav_cb
-        self.set_status = set_status
+        self.set_status = lambda msg: self._showing() and set_status(msg)
         self.load_mods_cb = load_mods_cb
         self.all_servers = _filter_state["servers"]
         self.sort_key = _filter_state["sort_key"]
@@ -645,7 +645,13 @@ class ServersView:
             log.error("Failed to fetch server list: %s", e)
             GLib.idle_add(self._fetch_done, f"Failed to load servers: {e}")
 
+    def _showing(self):
+        box = getattr(self, "srv_box", None)
+        return box is None or box.get_root() is not None
+
     def apply_filters(self, from_ping=False):
+        if not self._showing():
+            return False
         if not from_ping:
             self._ping_rounds = 0
         q = self.search.get_text().lower() if hasattr(self, "search") else ""

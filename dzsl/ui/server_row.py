@@ -156,7 +156,7 @@ class ServerRow(Gtk.Box):
         self.main_row.append(map_lbl)
 
         self.mods_lbl = Gtk.Label(label=format_mod_count(server))
-        self.mods_lbl.add_css_class("srv-detail")
+        self.mods_lbl.add_css_class("srv-mods")
         self.mods_lbl.set_size_request(52, -1)
         self.mods_lbl.set_halign(Gtk.Align.CENTER)
         self.main_row.append(self.mods_lbl)

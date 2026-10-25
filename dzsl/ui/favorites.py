@@ -78,6 +78,7 @@ class ListView:
     def _populate(self, box, servers):
         clear_box(box)
         self._expand_tracker[0] = None
+        self.set_status(f"{len(servers)} server{'' if len(servers) == 1 else 's'}")
         if not servers:
             el = Gtk.Label(label=self.empty_msg)
             el.add_css_class("empty"); el.set_justify(Gtk.Justification.CENTER)

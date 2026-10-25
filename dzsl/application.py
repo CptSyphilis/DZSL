@@ -644,6 +644,6 @@ class DZSL(Adw.Application):
 
 def main():
     try:
-        return DZSL().run()
+        return DZSL().run(sys.argv)
     except KeyboardInterrupt:
         return 130

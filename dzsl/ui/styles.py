@@ -106,6 +106,7 @@ button:disabled { opacity: 0.42; box-shadow: none; }
                     box-shadow: inset 2px 0 rgba(177,140,255,0.55); }
 .srv-name { color: #e9f0f5; font-size: 13px; font-weight: 600; }
 .srv-detail { color: #465563; font-size: 11px; }
+.srv-mods { color: #7f93a3; font-size: 12px; font-weight: 700; font-family: monospace; }
 .srv-players { color: #8ec9e6; font-size: 12px; font-weight: 700; font-family: monospace; }
 .ping-good { color: #4a8a4a; font-size: 11px; font-family: monospace; }
 .ping-ok   { color: #8a7a3a; font-size: 11px; font-family: monospace; }
