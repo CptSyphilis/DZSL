@@ -193,6 +193,26 @@ def build_launch_arguments(server_address, mod_links, profile_name="", game_para
     return arguments
 
 
+def launch_without_mods(cfg):
+    from dzsl.runtime import is_flatpak, open_external_uri
+
+    profile = (cfg.get("profile_name") or "").strip()
+    params = ["-nolauncher", "-world=empty"]
+    if is_flatpak():
+        cmd = build_host_launch_command("", [], profile, params)
+        try:
+            if subprocess.run(cmd, capture_output=True, timeout=20).returncode == 0:
+                return True
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        return open_external_uri(build_launch_uri("", [], profile, params))
+    try:
+        cmd = build_launch_command("", [], profile, params)
+        return subprocess.run(cmd, capture_output=True, timeout=20).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
 def build_launch_uri(server_address, mod_links, profile_name="", game_params=None, appid=DAYZ_APPID):
     arguments = build_launch_arguments(server_address, mod_links, profile_name, game_params)
     encoded = quote(subprocess.list2cmdline(arguments), safe="")

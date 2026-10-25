@@ -6,8 +6,9 @@ gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Adw, GLib, Gtk
 
-from dzsl.core.config import RECENT_FILE, VERSION, load_json
+from dzsl.core.config import RECENT_FILE, VERSION, load_cfg, load_json
 from dzsl.http import RequestError
+from dzsl.services.dayz import launch_without_mods
 from dzsl.services.updates import fetch_changelog
 from dzsl.paths import asset_path
 from dzsl.ui.branding import wordmark
@@ -89,6 +90,10 @@ class WelcomeView:
             b.add_css_class("welcome-secondary")
             b.connect("clicked", lambda _, v=view: self.show_view(v))
             row.append(b)
+        vanilla = Gtk.Button(label="Play without mods")
+        vanilla.add_css_class("welcome-secondary")
+        vanilla.connect("clicked", self._play_without_mods)
+        row.append(vanilla)
         news = Gtk.Button(label="What's new")
         news.add_css_class("welcome-secondary")
         news.connect("clicked", lambda _: self._show_changelog())
@@ -126,6 +131,26 @@ class WelcomeView:
         overlay.add_overlay(ver)
 
         self.panel.append(overlay)
+
+    def _play_without_mods(self, button):
+        button.set_sensitive(False)
+        button.set_label("Starting DayZ…")
+
+        def run():
+            ok = launch_without_mods(load_cfg())
+            GLib.idle_add(done, ok)
+
+        def reset():
+            button.set_sensitive(True)
+            button.set_label("Play without mods")
+            return False
+
+        def done(ok):
+            button.set_label("Play without mods" if ok else "Couldn't start DayZ")
+            GLib.timeout_add_seconds(5, reset)
+            return False
+
+        threading.Thread(target=run, daemon=True).start()
 
     def _load_changelog(self):
         try:
