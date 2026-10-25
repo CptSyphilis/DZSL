@@ -13,7 +13,7 @@ class SplashWindow(Gtk.Window):
         self.set_resizable(False)
         self.set_default_size(380, 250)
         self.set_title("DZSL")
-        overlay = "wayland" in type(self.get_display()).__name__.lower()
+        overlay = self.get_display().is_composited()
         if overlay:
             self.add_css_class("splash-overlay")
             self.maximize()
