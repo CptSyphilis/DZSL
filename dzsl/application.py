@@ -21,11 +21,11 @@ from dzsl.core.uri import parse_connect_uri
 from dzsl.lifecycle import cancel_active_downloads
 from dzsl.paths import ASSETS_DIR
 from dzsl.services.connector import Connector
-from dzsl.services.server_api import fetch_server
 from dzsl.runtime import is_flatpak
 from dzsl.services.updates import app_update_available, download_app_update, install_app_update_and_restart, outdated_mods, update_failed
 from dzsl.steam.login import steam_login_account
 from dzsl.ui.add_server import AddServerView
+from dzsl.ui.add_server import _lookup
 from dzsl.ui.branding import wordmark
 from dzsl.ui.favorites import ListView
 from dzsl.ui.helpers import clear_box
@@ -456,7 +456,7 @@ class DZSL(Adw.Application):
             "mods": [],
         }
         try:
-            server.update(fetch_server(host, port))
+            server.update(_lookup(host, port))
         except (OSError, RuntimeError, ValueError) as exc:
             log.warning("Could not resolve website server link %s:%s: %s", host, port, exc)
 
