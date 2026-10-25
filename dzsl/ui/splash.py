@@ -4,6 +4,7 @@ from gi.repository import GLib, Gtk
 
 from dzsl.core.constants import VERSION
 from dzsl.paths import ASSETS_DIR
+from dzsl.ui.branding import wordmark
 
 
 class SplashWindow(Gtk.Window):
@@ -35,9 +36,7 @@ class SplashWindow(Gtk.Window):
             img.set_pixel_size(72)
             box.append(img)
 
-        title = Gtk.Label(label="DZSL")
-        title.add_css_class("app-title")
-        box.append(title)
+        box.append(wordmark(76))
 
         version = Gtk.Label(label=f"v{VERSION}")
         version.add_css_class("splash-version")

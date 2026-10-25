@@ -26,7 +26,7 @@ from dzsl.runtime import is_flatpak
 from dzsl.services.updates import app_update_available, download_app_update, install_app_update_and_restart, outdated_mods, update_failed
 from dzsl.steam.login import steam_login_account
 from dzsl.ui.add_server import AddServerView
-from dzsl.ui.branding import DZSL_WORDMARK
+from dzsl.ui.branding import wordmark
 from dzsl.ui.favorites import ListView
 from dzsl.ui.helpers import clear_box
 from dzsl.ui.mods import ModsView
@@ -109,10 +109,7 @@ class DZSL(Adw.Application):
         header_bar.add_css_class("app-header")
         header_bar.set_show_end_title_buttons(True)
 
-        title = Gtk.Label()
-        title.set_markup(DZSL_WORDMARK)
-        title.add_css_class("app-title")
-        header_bar.set_title_widget(title)
+        header_bar.set_title_widget(wordmark(40))
 
         self.header_btns = {}
         nav_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
