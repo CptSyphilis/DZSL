@@ -533,15 +533,23 @@ class DZSL(Adw.Application):
                 self.show_view("favorites")
         AddServerView(box, self.favorites, self.set_status, on_added=added).build()
         dlg.set_child(box)
-        outside = Gtk.GestureClick()
-        outside.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
-        def on_press(_g, _n, x, y):
-            ok, bounds = box.compute_bounds(self.win)
-            if ok and not bounds.contains_point(Graphene.Point().init(x, y)):
-                dlg.close()
-        outside.connect("pressed", on_press)
-        self.win.add_controller(outside)
-        dlg.connect("closed", lambda _d: self.win.remove_controller(outside))
+        closing = [False]
+        def watch(host):
+            gesture = Gtk.GestureClick()
+            gesture.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+            def on_press(g, _n, x, y):
+                ok, bounds = box.compute_bounds(host)
+                if ok and not bounds.contains_point(Graphene.Point().init(x, y)):
+                    g.set_state(Gtk.EventSequenceState.CLAIMED)
+                    if not closing[0]:
+                        closing[0] = True
+                        dlg.close()
+            gesture.connect("pressed", on_press)
+            host.add_controller(gesture)
+            return gesture
+        win_gesture = watch(self.win)
+        watch(dlg)
+        dlg.connect("closed", lambda _d: self.win.remove_controller(win_gesture))
         dlg.present(self.win)
 
     def _on_close_request(self, win):
