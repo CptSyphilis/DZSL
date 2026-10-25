@@ -9,7 +9,9 @@ import shutil
 import subprocess
 from urllib.parse import quote
 
-from dzsl.core.config import DAYZ_APPID, steam_library_root, workshop_dirs
+from dzsl.core.config import DAYZ_APPID, _steam_library_paths, steam_library_root, workshop_dirs
+
+EXPERIMENTAL_APPID = "1024020"
 from dzsl.steam.workshop import validate_mod_folder
 
 class ModSetupError(RuntimeError):
@@ -34,8 +36,27 @@ _PRODUCT_VERSION = re.compile(rb"P\0r\0o\0d\0u\0c\0t\0V\0e\0r\0s\0i\0o\0n\0(?:\0
 
 
 # The exe's ProductVersion ("1.30.164200.56") matches the version servers report minus the last part.
-def installed_version(cfg):
-    exe = os.path.join(dayz_dir(cfg), "DayZ_x64.exe")
+def experimental_state(cfg):
+    for lib in _steam_library_paths(cfg.get("steam_root", "")):
+        acf = os.path.join(lib, "steamapps", f"appmanifest_{EXPERIMENTAL_APPID}.acf")
+        try:
+            text = open(acf, errors="ignore").read()
+        except OSError:
+            continue
+        installdir = re.search(r'"installdir"\s*"([^"]+)"', text)
+        flags = re.search(r'"StateFlags"\s*"(\d+)"', text)
+        game_dir = os.path.join(lib, "steamapps", "common", installdir.group(1) if installdir else "DayZ Exp")
+        ready = bool(flags) and int(flags.group(1)) == 4 and os.path.isfile(os.path.join(game_dir, "DayZ_x64.exe"))
+        return ("installed" if ready else "downloading"), game_dir
+    return "missing", ""
+
+
+def same_major(a, b):
+    return bool(a and b) and a.split(".")[:2] == b.split(".")[:2]
+
+
+def installed_version(cfg, game_dir=None):
+    exe = os.path.join(game_dir or dayz_dir(cfg), "DayZ_x64.exe")
     try:
         key = (exe, os.path.getmtime(exe))
     except OSError:
@@ -50,7 +71,8 @@ def installed_version(cfg):
             version = ".".join(match.group(1).decode("utf-16-le").split(".")[:3])
     except OSError:
         pass
-    _version_cache.update(key=key, version=version)
+    if not game_dir:
+        _version_cache.update(key=key, version=version)
     return version
 
 
@@ -83,9 +105,9 @@ def _missing_mod_error(cfg, mod_id):
     return f"Missing Workshop mod {mod_id}"
 
 
-def setup_mod_links(cfg, mod_ids):
+def setup_mod_links(cfg, mod_ids, game_dir=None):
     """Validate Workshop mods and ensure DayZ-relative symlinks exist."""
-    game_dir = dayz_dir(cfg)
+    game_dir = game_dir or dayz_dir(cfg)
     if not os.path.isdir(game_dir):
         raise ModSetupError(f"DayZ directory is missing: {game_dir}")
 
@@ -149,9 +171,9 @@ def steam_launch_prefix():
     raise FileNotFoundError("Steam executable was not found")
 
 
-def build_launch_command(server_address, mod_links, profile_name="", game_params=None):
+def build_launch_command(server_address, mod_links, profile_name="", game_params=None, appid=DAYZ_APPID):
     arguments = build_launch_arguments(server_address, mod_links, profile_name, game_params)
-    return steam_launch_prefix() + ["-applaunch", str(DAYZ_APPID)] + arguments
+    return steam_launch_prefix() + ["-applaunch", str(appid)] + arguments
 
 
 def build_launch_arguments(server_address, mod_links, profile_name="", game_params=None):
@@ -166,7 +188,7 @@ def build_launch_arguments(server_address, mod_links, profile_name="", game_para
     return arguments
 
 
-def build_launch_uri(server_address, mod_links, profile_name="", game_params=None):
+def build_launch_uri(server_address, mod_links, profile_name="", game_params=None, appid=DAYZ_APPID):
     arguments = build_launch_arguments(server_address, mod_links, profile_name, game_params)
     encoded = quote(subprocess.list2cmdline(arguments), safe="")
-    return f"steam://run/{DAYZ_APPID}//{encoded}/"
+    return f"steam://run/{appid}//{encoded}/"

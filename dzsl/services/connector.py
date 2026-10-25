@@ -4,13 +4,16 @@ gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import GLib, Adw, Gtk
 from dzsl.core.config import (
-    mod_installed, mod_subscribed, save_json, RECENT_FILE, load_json, load_cfg,
+    DAYZ_APPID, mod_installed, mod_subscribed, save_json, RECENT_FILE, load_json, load_cfg,
     FAVS_FILE,
 )
 from dzsl.core.logging import get_logger
 from dzsl.paths import ENV_FILE
 from dzsl.runtime import is_flatpak, open_external_uri
-from dzsl.services.dayz import ModSetupError, build_launch_command, build_launch_uri, setup_mod_links
+from dzsl.services.dayz import (
+    EXPERIMENTAL_APPID, ModSetupError, build_launch_command, build_launch_uri,
+    experimental_state, installed_version, same_major, setup_mod_links,
+)
 from dzsl.services.launch_gate import launch_block_reason
 from dzsl.services.a2s import query_mods
 from dzsl.services.server_api import fetch_server
@@ -35,6 +38,8 @@ class Connector:
         self.set_downloading = set_downloading or (lambda *_: None)
         self._busy = False
         self._download_scheduled = False
+        self._appid = DAYZ_APPID
+        self._game_dir = None
         self.subscriptions = SteamSubscriptionManager(
             lambda: self.cfg,
             self._refresh_cfg,
@@ -304,7 +309,33 @@ class Connector:
             mod_links or [],
             profile,
             self._game_params(password),
+            appid=self._appid,
         )
+
+    def _pick_game(self, server, launch):
+        self._appid, self._game_dir = DAYZ_APPID, None
+        wanted = server.get("version") or ""
+        main = installed_version(self.cfg)
+        if not wanted or not main or same_major(wanted, main) or _ver(wanted) > _ver(main):
+            return True
+        state, game_dir = experimental_state(self.cfg)
+        if state == "installed" and same_major(wanted, installed_version(self.cfg, game_dir)):
+            log.info("Server runs %s; using DayZ Experimental at %s", wanted, game_dir)
+            self._appid, self._game_dir = EXPERIMENTAL_APPID, game_dir
+            return True
+        if not launch or state == "installed":
+            return True
+        short = ".".join(wanted.split(".")[:2])
+        if state == "missing":
+            open_external_uri(f"steam://install/{EXPERIMENTAL_APPID}")
+            msg = (f"This server runs DayZ {short}. Install DayZ Experimental in Steam "
+                   f"(opened for you), then join again.")
+        else:
+            open_external_uri("steam://open/downloads")
+            msg = f"This server runs DayZ {short}. DayZ Experimental is still downloading in Steam — join again when it's done."
+        self.set_status(msg)
+        self._show_error(f"DayZ {short} needed", msg)
+        return False
 
     def _run_launcher(self, server, mod_ids=None, launch=True, password=None):
         try:
@@ -313,7 +344,7 @@ class Connector:
                 blocked = launch_block_reason(self.cfg, ids)
                 if blocked:
                     return subprocess.CompletedProcess(args=[], returncode=1, stdout="", stderr=blocked)
-            mod_links = setup_mod_links(self.cfg, ids)
+            mod_links = setup_mod_links(self.cfg, ids, self._game_dir)
             if not launch:
                 return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
             if is_flatpak():
@@ -325,6 +356,7 @@ class Connector:
                     mod_links,
                     profile,
                     self._game_params(password),
+                    appid=self._appid,
                 )
                 if open_external_uri(uri):
                     return subprocess.CompletedProcess(args=[uri], returncode=0, stdout="", stderr="")
@@ -417,6 +449,9 @@ class Connector:
         if launch and self.is_dayz_running():
             self.set_status("Restarting DayZ with correct mods…")
             self.kill_dayz()
+
+        if not self._pick_game(server, launch):
+            return
 
         self.set_status("Resolving server mod list…")
         server_mods, mod_names = self._resolve_mods(server)
@@ -658,3 +693,7 @@ class Connector:
         if self.win:
             self.win.set_visible(True)
             self.win.present()
+
+
+def _ver(value):
+    return tuple(int(p) for p in re.findall(r"\d+", value)[:2])
