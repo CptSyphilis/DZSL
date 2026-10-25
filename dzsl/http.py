@@ -7,6 +7,8 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit
 from urllib.request import HTTPSHandler, Request, build_opener
 
+from dzsl.core.constants import VERSION
+
 
 class RequestError(RuntimeError):
     def __init__(self, message, status=None):
@@ -48,6 +50,7 @@ class _IPv4FirstHTTPSHandler(HTTPSHandler):
 
 
 _opener = build_opener(_IPv4FirstHTTPSHandler(context=ssl.create_default_context()))
+_opener.addheaders = [("User-Agent", f"DZSL/{VERSION}")]
 
     
 def _json_request(url, method="GET", params=None, data=None, json_body=None, headers=None, timeout=30):
