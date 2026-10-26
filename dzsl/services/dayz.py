@@ -149,6 +149,18 @@ def setup_mod_links(cfg, mod_ids, game_dir=None):
     return links
 
 
+def dayz_running():
+    from dzsl.runtime import is_flatpak
+
+    cmd = ["pgrep", "-f", "DayZ_x64"]
+    if is_flatpak():
+        cmd = ["flatpak-spawn", "--host", *cmd]
+    try:
+        return subprocess.run(cmd, capture_output=True, timeout=5).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
 def steam_launch_prefix():
     steam = shutil.which("steam")
     if steam:

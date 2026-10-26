@@ -21,6 +21,7 @@ from dzsl.core.uri import parse_connect_uri
 from dzsl.lifecycle import cancel_active_downloads
 from dzsl.paths import ASSETS_DIR
 from dzsl.services.connector import Connector
+from dzsl.services.dayz import dayz_running
 from dzsl.runtime import is_flatpak
 from dzsl.services.updates import app_update_available, download_app_update, install_app_update_and_restart, outdated_mods, update_failed
 from dzsl.steam.login import steam_login_account
@@ -41,6 +42,7 @@ from dzsl.ui.welcome import WelcomeView
 setup_logging()
 log = get_logger("main")
 UPDATE_CHECK_SECONDS = 3600
+GAME_CHECK_SECONDS = 15
 
 class DZSL(Adw.Application):
     def __init__(self):
@@ -55,6 +57,8 @@ class DZSL(Adw.Application):
         self.current_view = "welcome"
         self._pending_connect = None
         self._steam_ready = False
+        self.in_game = False
+        self._update_check_deferred = False
         self._steam_account = None
 
     def on_command_line(self, _app, command_line):
@@ -266,12 +270,29 @@ class DZSL(Adw.Application):
         elif update:
             self._offer_update(update)
         GLib.timeout_add_seconds(UPDATE_CHECK_SECONDS, self._update_check_tick)
+        GLib.timeout_add_seconds(GAME_CHECK_SECONDS, self._game_check_tick)
         if stale:
             self._show_mod_update_dialog(stale)
         return False
 
+    def _game_check_tick(self):
+        threading.Thread(
+            target=lambda: GLib.idle_add(self._set_in_game, dayz_running()), daemon=True
+        ).start()
+        return True
+
+    def _set_in_game(self, running):
+        was = self.in_game
+        self.in_game = running
+        if was and not running and self._update_check_deferred:
+            self._update_check_deferred = False
+            self._update_check_tick()
+        return False
+
     def _update_check_tick(self):
-        if not self.update_banner.get_revealed():
+        if self.in_game:
+            self._update_check_deferred = True
+        elif not self.update_banner.get_revealed():
             threading.Thread(target=self._background_update_check, daemon=True).start()
         return True
 
@@ -423,6 +444,8 @@ class DZSL(Adw.Application):
             self._recheck_source = GLib.timeout_add_seconds(2, self._recheck_tick)
 
     def _poll_steam_status(self):
+        if self.in_game:
+            return True
         current = self.status_lbl.get_text()
         if current in self._idle_statuses() or current.startswith("Signed in to Steam as "):
             self._update_steam_status()
