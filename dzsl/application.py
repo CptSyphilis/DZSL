@@ -284,6 +284,26 @@ class DZSL(Adw.Application):
         if update:
             GLib.idle_add(self._offer_update, update)
 
+    def _manual_update_check(self, done):
+        def worker():
+            try:
+                update = app_update_available()
+            except Exception as exc:
+                log.warning("DZSL update check failed: %s", exc)
+                GLib.idle_add(done, "Couldn't check for updates. Check your connection.")
+                return
+            GLib.idle_add(finish, update)
+
+        def finish(update):
+            if update:
+                self._offer_update(update)
+                done(f"DZSL {update['version']} is available (you have v{VERSION})")
+            else:
+                done(f"You're up to date (v{VERSION})")
+            return False
+
+        threading.Thread(target=worker, daemon=True).start()
+
     def _offer_update(self, update):
         if not is_flatpak():
             self.set_status(f"DZSL {update['version']} is available (you have {VERSION})")
@@ -579,6 +599,7 @@ class DZSL(Adw.Application):
                 lambda: self.show_view("settings"),
                 self.set_downloading,
                 lambda: self.show_view("favorites"),
+                self._manual_update_check,
             ).build()
 
     def _open_add_server_dialog(self):

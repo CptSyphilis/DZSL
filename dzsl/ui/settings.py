@@ -2,7 +2,7 @@ import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Adw, Gtk, GLib
-from dzsl.core.config import DEFAULT_CFG, save_cfg, workshop_dir
+from dzsl.core.config import DEFAULT_CFG, VERSION, save_cfg, workshop_dir
 from dzsl.ui.helpers import forward_steam_uri, unsubscribe_mod_ids
 from dzsl.ui.workshop_actions import WorkshopActionRunner
 import os
@@ -39,13 +39,14 @@ def mods_dir_warning(path):
 
 
 class SettingsView:
-    def __init__(self, panel, cfg, set_status, reload_cb, set_downloading=None, saved_cb=None):
+    def __init__(self, panel, cfg, set_status, reload_cb, set_downloading=None, saved_cb=None, check_updates=None):
         self.panel      = panel
         self.cfg        = cfg
         self.set_status = set_status
         self.reload_cb  = reload_cb
         self.set_downloading = set_downloading or (lambda *_: None)
         self.saved_cb = saved_cb or (lambda: None)
+        self.check_updates = check_updates
         self.workshop = WorkshopActionRunner(cfg, set_status, self.set_downloading)
 
     def build(self):
@@ -205,6 +206,18 @@ class SettingsView:
         ub.connect("clicked", self._confirm_unsubscribe_all)
         ws.append(ub)
 
+        if self.check_updates:
+            up = card("UPDATES")
+            up_note = Gtk.Label(label=f"You have DZSL v{VERSION}")
+            up_note.add_css_class("settings-note")
+            up_note.set_halign(Gtk.Align.START)
+            up.append(up_note)
+            cu = Gtk.Button(label="CHECK FOR UPDATES")
+            cu.add_css_class("btn-connect")
+            cu.set_halign(Gtk.Align.START)
+            cu.connect("clicked", self._check_updates, up_note)
+            up.append(cu)
+
         # ── SAVE / RESET ──
         btn_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         sb = Gtk.Button(label="Save Settings")
@@ -219,6 +232,16 @@ class SettingsView:
 
         scroll.set_child(outer)
         self.panel.append(scroll)
+
+    def _check_updates(self, button, note):
+        button.set_sensitive(False)
+        note.set_text("Checking for updates…")
+
+        def done(msg):
+            note.set_text(msg)
+            button.set_sensitive(True)
+
+        self.check_updates(done)
 
     def _save_settings(self, *_):
         save_cfg(self.cfg)
