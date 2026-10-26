@@ -40,6 +40,7 @@ from dzsl.ui.welcome import WelcomeView
 
 setup_logging()
 log = get_logger("main")
+UPDATE_CHECK_SECONDS = 3600
 
 class DZSL(Adw.Application):
     def __init__(self):
@@ -138,6 +139,11 @@ class DZSL(Adw.Application):
         header_bar.pack_start(self.back_btn)
 
         root.append(header_bar)
+
+        self.update_banner = Adw.Banner()
+        self.update_banner.set_button_label("Update now")
+        self.update_banner.connect("button-clicked", self._on_update_banner_clicked)
+        root.append(self.update_banner)
 
         self.panel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self.panel.set_vexpand(True)
@@ -258,9 +264,66 @@ class DZSL(Adw.Application):
         if failed:
             self.set_status("DZSL update failed — download it from dayzlinux.com")
         elif update:
-            self.set_status(f"DZSL {update['version']} is available (you have {VERSION})")
+            self._offer_update(update)
+        GLib.timeout_add_seconds(UPDATE_CHECK_SECONDS, self._update_check_tick)
         if stale:
             self._show_mod_update_dialog(stale)
+        return False
+
+    def _update_check_tick(self):
+        if not self.update_banner.get_revealed():
+            threading.Thread(target=self._background_update_check, daemon=True).start()
+        return True
+
+    def _background_update_check(self):
+        try:
+            update = app_update_available()
+        except Exception as exc:
+            log.warning("DZSL update check failed: %s", exc)
+            return
+        if update:
+            GLib.idle_add(self._offer_update, update)
+
+    def _offer_update(self, update):
+        if not is_flatpak():
+            self.set_status(f"DZSL {update['version']} is available (you have {VERSION})")
+            return False
+        self.update_banner.set_title(f"DZSL {update['version']} is ready")
+        self.update_banner.set_button_label("Update now")
+        self.update_banner.set_sensitive(True)
+        self.update_banner.set_revealed(True)
+        return False
+
+    def _on_update_banner_clicked(self, banner):
+        if getattr(self.connector, "_busy", False):
+            banner.set_title("Finish connecting to the server first, then update")
+            return
+        banner.set_sensitive(False)
+        banner.set_title("Downloading update…")
+        threading.Thread(target=self._banner_update, daemon=True).start()
+
+    def _banner_update(self):
+        def progress(f):
+            GLib.idle_add(self.update_banner.set_title, f"Downloading update… {int(f * 100)}%")
+        try:
+            bundle = download_app_update(progress)
+        except Exception as exc:
+            log.warning("DZSL update download failed: %s", exc)
+            GLib.idle_add(self._banner_update_failed)
+            return
+        GLib.idle_add(self.update_banner.set_title, "Installing update — DZSL will restart")
+        try:
+            install_app_update_and_restart(bundle)
+        except OSError as exc:
+            log.warning("DZSL update install failed: %s", exc)
+            GLib.idle_add(self._banner_update_failed)
+            return
+        GLib.idle_add(self.quit)
+
+    def _banner_update_failed(self):
+        self.update_banner.set_title("Update failed")
+        self.update_banner.set_button_label("Try again")
+        self.update_banner.set_sensitive(True)
         return False
 
     def _show_mod_update_dialog(self, stale):
