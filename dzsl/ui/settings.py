@@ -279,7 +279,7 @@ class SettingsView:
             return
         self._confirm(
             "Verify and repair all Workshop mods?",
-            f"This checks {count} installed mods and asks Steam to redownload any invalid content. It can take a long time.",
+            f"This checks {count} installed mods on disk. Only broken or outdated ones are sent to Steam to redownload.",
             "Verify All",
             self.workshop.verify_installed_mods,
         )

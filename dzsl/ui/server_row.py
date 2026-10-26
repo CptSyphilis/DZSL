@@ -6,6 +6,7 @@ import threading
 
 from dzsl.runtime import open_external_uri
 from dzsl.services.listings import fetch_banner, join_url
+from dzsl.services.restarts import describe, played_restarts
 from dzsl.ui.helpers import (
     format_mod_count, format_played, format_server_time, normalize_map_name, server_key,
     format_server_subtitle, server_tags, server_version_mismatch,
@@ -120,6 +121,13 @@ class ServerRow(Gtk.Box):
         self.no_resp_tag.add_css_class("tag-pass")
         self.no_resp_tag.set_tooltip_text("The server didn't answer. It may be offline or restarting.")
         top.append(self.no_resp_tag)
+        self.restart_tag = Gtk.Label()
+        self.restart_tag.add_css_class("tag")
+        self.restart_tag.add_css_class("tag-van")
+        self.restart_tag.set_visible(False)
+        top.append(self.restart_tag)
+        if played_ts:
+            threading.Thread(target=self._restart_thread, daemon=True).start()
         if pw:
             lock = Gtk.Label(label="🔒")
             lock.add_css_class("tag")
@@ -404,6 +412,24 @@ class ServerRow(Gtk.Box):
 
         popover.set_child(box)
         popup_at_cursor(popover, self, 0, 0)
+
+    def _restart_thread(self):
+        ip, port = server_key(self.server)
+        info = played_restarts().get(f"{ip}:{port}")
+        GLib.idle_add(self._show_restart, info)
+
+    def _show_restart(self, info):
+        shown = describe(info)
+        if not shown:
+            return False
+        text, tip, soon = shown
+        self.restart_tag.set_label(text)
+        self.restart_tag.set_tooltip_text(tip)
+        if soon:
+            self.restart_tag.remove_css_class("tag-van")
+            self.restart_tag.add_css_class("tag-warn")
+        self.restart_tag.set_visible(True)
+        return False
 
     def _ping_text(self, ping):
         return f"{ping}" if ping else "-"

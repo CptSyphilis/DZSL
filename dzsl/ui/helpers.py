@@ -50,13 +50,18 @@ def format_played(ts):
         delta = max(0, time.time() - float(ts))
     except (TypeError, ValueError):
         return ""
-    if delta < 3600:
+    if delta < 600:
         return "just now"
+    if delta < 3600:
+        return f"{int(delta // 600) * 10} min ago"
     if delta < 86400:
         h = int(delta / 3600)
         return f"{h} hour{'s' if h != 1 else ''} ago"
-    days = int(delta / 86400)
-    return f"{days} day{'s' if days != 1 else ''} ago"
+    if delta < 7 * 86400:
+        days = int(delta / 86400)
+        return f"{days} day{'s' if days != 1 else ''} ago"
+    weeks = int(delta / (7 * 86400))
+    return f"{weeks} week{'s' if weeks != 1 else ''} ago"
 
 def format_server_time(server):
     t = server.get("time")

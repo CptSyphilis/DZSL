@@ -125,6 +125,15 @@ class SteamSubscriptionManager:
             return False
         return True
 
+    def queue_mods(self, mod_ids):
+        ids = [str(mid) for mid in mod_ids or []]
+        if not ids:
+            return True
+        ok, error = run_workshop_helper("download", ids, timeout=max(30, 2 * len(ids)))
+        if not ok:
+            log.error("Steamworks queue failed for %d mod(s): %s", len(ids), error or "Steam rejected the request")
+        return ok
+
     def close_native_session(self):
         # Native sessions live in short-lived helper subprocesses now, so the
         # main process never holds one. Kept for the connector's pre-launch

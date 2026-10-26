@@ -11,6 +11,7 @@ from dzsl.core.config import (
     is_steam_running,
     load_cfg,
     mod_installed,
+    mod_subscribed,
     workshop_dirs,
 )
 from dzsl.core.logging import get_logger
@@ -113,9 +114,21 @@ class WorkshopActionRunner:
         if not mods:
             self.set_status("No Workshop mods found. Check Steam Library Root in Settings.")
             return
-        ids = [m["id"] for m in mods]
-        names = {m["id"]: m["name"] for m in mods}
-        self.install_mods(ids, names, label=f"Verifying {len(ids)} Workshop mod(s)", repair=True)
+        threading.Thread(target=self._verify_worker, args=(mods,), daemon=True).start()
+
+    def broken_mods(self, mods):
+        self._refresh_cfg()
+        return [m for m in mods if not mod_installed(self.cfg, m["id"])]
+
+    def _verify_worker(self, mods):
+        self.set_status(f"Checking {len(mods)} Workshop mod(s)...")
+        broken = self.broken_mods(mods)
+        if not broken:
+            self.set_status(f"All {len(mods)} Workshop mods verified OK.")
+            return
+        ids = [m["id"] for m in broken]
+        names = {m["id"]: m["name"] for m in broken}
+        GLib.idle_add(self.install_mods, ids, names, f"Repairing {len(ids)} broken Workshop mod(s)", True)
 
     def _delete_corrupt_mods(self):
         corrupt = find_corrupt_mods(self.cfg)
@@ -152,12 +165,12 @@ class WorkshopActionRunner:
                 if removed:
                     self.set_status(f"Redownloading {removed} Workshop mod(s)...")
 
-            for mid in ids:
-                if progress.is_cancelled():
-                    self.set_status("Workshop action cancelled.")
-                    return
-                self.subscriptions.subscribe_mod_steam(mid, names.get(mid, mid))
-                time.sleep(0.25)
+            if progress.is_cancelled():
+                self.set_status("Workshop action cancelled.")
+                return
+            pending = [mid for mid in ids if not (mod_installed(self.cfg, mid) and mod_subscribed(self.cfg, mid))]
+            if pending:
+                self.subscriptions.queue_mods(pending)
             self.subscriptions.open_steam_downloads()
 
             sizes = self.downloads.fetch_mod_sizes(ids)

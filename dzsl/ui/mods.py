@@ -874,20 +874,54 @@ class ModsView:
         if not selected:
             self.set_status("No mods installed.")
             return
-        failed = 0
+        broken_ids = {m["id"] for m in self.workshop.broken_mods(selected)}
+        broken = []
         for mod in selected:
             valid, reason = validate_mod_folder(mod["path"])
+            ok = valid and mod["id"] not in broken_ids
             row = self._mod_rows.get(mod["id"])
             if row:
-                if valid and mod["id"] in self._outdated_ids:
+                if ok and mod["id"] in self._outdated_ids:
                     row._set_state("update", "Verified locally · Workshop update available")
+                elif ok:
+                    row._set_state("good", "Verified · installed and current in Steam")
                 else:
-                    row._set_state("good" if valid else "bad", "Verified · local PBO payload is readable" if valid else reason)
-            failed += int(not valid)
-        self.set_status(
-            f"Verified {len(selected)} mods · {failed} need attention"
-            if failed else f"Verified {len(selected)} mods · all ready"
-        )
+                    row._set_state("bad", reason or "Steam reports it incomplete or outdated")
+            if not ok:
+                broken.append(mod)
+        if not broken:
+            self.set_status(f"Verified {len(selected)} mods · all ready")
+            return
+        self.set_status(f"Verified {len(selected)} mods · {len(broken)} need repair")
+        self._confirm_repair(broken)
+
+    def _confirm_repair(self, broken):
+        win = transient_window(self.panel)
+        if not win:
+            return
+        d = Adw.MessageDialog(transient_for=win)
+        d.set_heading(f"Repair {len(broken)} broken mod(s)?")
+        names = "\n".join(m["name"] for m in broken[:12]) + ("\n…" if len(broken) > 12 else "")
+        d.set_body("Steam will redownload these mods:\n\n" + names)
+        d.add_response("cancel", "Not now")
+        d.add_response("repair", "Repair")
+        d.set_response_appearance("repair", Adw.ResponseAppearance.SUGGESTED)
+        d.set_default_response("repair")
+        d.set_close_response("cancel")
+
+        def on_response(dialog, response):
+            dialog.destroy()
+            if response != "repair":
+                return
+            self.workshop.install_mods(
+                [m["id"] for m in broken],
+                {m["id"]: m["name"] for m in broken},
+                label=f"Repairing {len(broken)} broken mod(s)",
+                repair=True,
+            )
+
+        d.connect("response", on_response)
+        d.present()
 
     def _repair_selected_mods(self):
         selected = [self._installed_mod_map[mid] for mid in self._selected_mod_ids if mid in self._installed_mod_map]
