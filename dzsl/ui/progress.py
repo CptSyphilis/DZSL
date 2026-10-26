@@ -1,3 +1,4 @@
+import time
 import threading
 import gi
 gi.require_version('Gtk', '4.0')
@@ -39,9 +40,9 @@ class ModProgressDialog:
         self.popover.add_css_class("dl-toast")
         self.popover.set_position(Gtk.PositionType.TOP)
         self.popover.set_has_arrow(False)
-        # Screenshot tools temporarily move focus away from DZSL. Keep active
-        # download details visible until the user toggles them or work ends.
-        self.popover.set_autohide(False)
+        self.popover.set_autohide(True)
+        self.closed_at = 0.0
+        self.popover.connect("closed", lambda *_: setattr(self, "closed_at", time.monotonic()))
 
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         root.add_css_class("dl-toast-body")

@@ -15,6 +15,8 @@ def load_environment(path):
         if not key.replace("_", "").isalnum() or key[0].isdigit():
             continue
         value = value.strip()
+        if value[:1] not in "\"'":
+            value = value.split(" #", 1)[0].split("\t#", 1)[0].strip()
         if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
             value = value[1:-1]
         os.environ.setdefault(key, value)

@@ -5,7 +5,7 @@ import threading
 from dzsl.core.config import load_cfg
 from dzsl.services.dayz import installed_version
 from dzsl.ui.helpers import clear_box, recent_map
-from dzsl.ui.ping import ping_servers
+from dzsl.ui.ping import apply_live, ping_servers
 from dzsl.ui.server_row import ServerRow
 
 class ListView:
@@ -85,6 +85,7 @@ class ListView:
             el.set_margin_top(80); box.append(el)
             return
         self._refresh_from_feed(servers)
+        apply_live(servers)
         played_lookup = recent_map()
         local_version = installed_version(load_cfg())
         for s in servers:

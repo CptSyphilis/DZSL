@@ -1,5 +1,6 @@
 import re
 import subprocess
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dzsl.core.uri import validate_host
 from dzsl.services.a2s import A2SError, query_info, query_mods
@@ -24,6 +25,22 @@ def measure_ping(ip, timeout=1.5):
     except (OSError, subprocess.SubprocessError, ValueError):
         return None
     return None
+
+
+LIVE_TTL = 300
+_live = {}
+
+
+def _live_key(server):
+    return server_ip(server), str(server.get("gamePort") or server.get("port") or "")
+
+
+def apply_live(servers):
+    now = time.monotonic()
+    for server in servers:
+        hit = _live.get(_live_key(server))
+        if hit and now - hit[0] < LIVE_TTL:
+            server["players"], server["queue"] = hit[1], hit[2]
 
 
 def server_ip(server):
@@ -77,6 +94,7 @@ def ping_servers(servers, max_workers=16, limit=80):
                 server["ping"] = result["ping"]
                 server["players"] = result["players"]
                 server["queue"] = result.get("queue", 0)
+                _live[_live_key(server)] = (time.monotonic(), server["players"], server["queue"])
                 if result.get("mods"):
                     server["mods"] = result["mods"]
             else:

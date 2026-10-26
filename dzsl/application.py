@@ -356,14 +356,22 @@ class DZSL(Adw.Application):
             body=f"Newer Workshop versions exist for:\n\n{names}",
         )
         dlg.add_response("later", "Later")
-        dlg.add_response("mods", "Open Mods")
-        dlg.set_response_appearance("mods", Adw.ResponseAppearance.SUGGESTED)
-        dlg.connect("response", self._on_mod_update_response)
+        dlg.add_response("update", f"Update mod{'s' if len(stale) != 1 else ''}")
+        dlg.set_response_appearance("update", Adw.ResponseAppearance.SUGGESTED)
+        dlg.connect("response", self._on_mod_update_response, stale)
         dlg.present()
 
-    def _on_mod_update_response(self, _dlg, response):
-        if response == "mods":
+    def _on_mod_update_response(self, _dlg, response, stale):
+        if response == "update":
+            from dzsl.ui.workshop_actions import WorkshopActionRunner
             self.show_view("mods")
+            WorkshopActionRunner(self.cfg, self.set_status, self.set_downloading).install_mods(
+                [m["id"] for m in stale],
+                {m["id"]: m["name"] for m in stale},
+                f"Updating {len(stale)} outdated mod(s)",
+                True,
+                True,
+            )
 
     def _on_window_realize(self, win):
         surface = win.get_surface()
@@ -686,7 +694,7 @@ class DZSL(Adw.Application):
             return
         if p.popover.get_visible():
             p.popover.popdown()
-        else:
+        elif time.monotonic() - p.closed_at > 0.3:
             p.popover.popup()
 
     def _build_welcome(self):

@@ -22,7 +22,7 @@ from dzsl.ui.helpers import (
     is_map_filter_active, is_map_header_label, SORT_OPTIONS, parse_sort_mode,
     sort_mode_for_key, map_id, mod_count,
 )
-from dzsl.ui.ping import ping_servers
+from dzsl.ui.ping import apply_live, ping_servers
 
 log = get_logger("servers")
 
@@ -633,6 +633,7 @@ class ServersView:
     def _fetch_thread(self):
         try:
             self.all_servers = fetch_servers(API_URL)
+            apply_live(self.all_servers)
             attach_featured_listings(self.all_servers, self.gold_listings)
             _filter_state["servers"] = self.all_servers
             log.info("Fetched %d servers", len(self.all_servers))
