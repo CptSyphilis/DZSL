@@ -874,7 +874,15 @@ class ModsView:
         if not selected:
             self.set_status("No mods installed.")
             return
-        broken_ids = {m["id"] for m in self.workshop.broken_mods(selected)}
+        self.set_status(f"Checking {len(selected)} mods...")
+
+        def check():
+            broken_ids = {m["id"] for m in self.workshop.broken_mods(selected)}
+            GLib.idle_add(self._show_verify_result, selected, broken_ids)
+
+        threading.Thread(target=check, daemon=True).start()
+
+    def _show_verify_result(self, selected, broken_ids):
         broken = []
         for mod in selected:
             valid, reason = validate_mod_folder(mod["path"])
@@ -891,9 +899,10 @@ class ModsView:
                 broken.append(mod)
         if not broken:
             self.set_status(f"Verified {len(selected)} mods · all ready")
-            return
+            return False
         self.set_status(f"Verified {len(selected)} mods · {len(broken)} need repair")
         self._confirm_repair(broken)
+        return False
 
     def _confirm_repair(self, broken):
         win = transient_window(self.panel)
