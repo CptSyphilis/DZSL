@@ -126,6 +126,7 @@ class WelcomeView:
         ver.set_margin_end(14)
         ver.set_margin_bottom(10)
         overlay.add_overlay(ver)
+        overlay.add_overlay(self._build_news_popup())
 
         self.panel.append(overlay)
 
@@ -186,10 +187,59 @@ class WelcomeView:
         self.news_body.append(loading)
         scroll.set_child(self.news_body)
         card.append(scroll)
+        card.set_cursor_from_name("pointer")
+        click = Gtk.GestureClick()
+        click.connect("released", lambda *_: self._show_news_popup(True))
+        card.add_controller(click)
+        self.news_card = card
         return card
 
+    def _show_news_popup(self, show):
+        self.news_popup.set_visible(show)
+        self.news_card.set_visible(not show)
+
+    def _build_news_popup(self):
+        backdrop = Gtk.Box()
+        backdrop.add_css_class("welcome-news-backdrop")
+        backdrop.set_visible(False)
+        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        card.add_css_class("welcome-news")
+        card.set_size_request(620, 560)
+        card.set_hexpand(True)
+        card.set_vexpand(True)
+        card.set_halign(Gtk.Align.CENTER)
+        card.set_valign(Gtk.Align.CENTER)
+        head = Gtk.Label(label="WHAT'S NEW")
+        head.add_css_class("welcome-resume-eyebrow")
+        head.set_halign(Gtk.Align.START)
+        card.append(head)
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_vexpand(True)
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self.news_popup_body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        scroll.set_child(self.news_popup_body)
+        card.append(scroll)
+        backdrop.append(card)
+        click = Gtk.GestureClick()
+        click.connect("released", self._news_backdrop_clicked)
+        backdrop.add_controller(click)
+        self.news_popup = backdrop
+        self.news_popup_card = card
+        return backdrop
+
+    def _news_backdrop_clicked(self, _gesture, _n, x, y):
+        widget = self.news_popup.pick(x, y, Gtk.PickFlags.DEFAULT)
+        while widget is not None and widget is not self.news_popup:
+            if widget is self.news_popup_card:
+                return
+            widget = widget.get_parent()
+        self._show_news_popup(False)
+
     def _fill_news(self):
-        body = self.news_body
+        for body in (self.news_body, self.news_popup_body):
+            self._fill_news_body(body)
+
+    def _fill_news_body(self, body):
         while child := body.get_first_child():
             body.remove(child)
         if self.changelog is None:
