@@ -48,6 +48,8 @@ def _span(seconds):
     hours, minutes = divmod(minutes, 60)
     if not hours:
         return f"{minutes}m"
+    if hours >= 24:
+        return f"{hours // 24}d {hours % 24}h"
     return f"{hours}h {minutes:02d}m" if minutes else f"{hours}h"
 
 
@@ -55,14 +57,11 @@ def describe(info, now=None):
     if not info or not info.get("lastRestart"):
         return None
     now = now or time.time()
-    last = info["lastRestart"] / 1000
-    since = f"Last restart {_span(now - last)} ago."
+    up = now - info["lastRestart"] / 1000
+    text = f"restarted {_span(up)} ago"
     if info.get("next") and info.get("every"):
         left = info["next"] / 1000 - now
-        tip = (f"Restarts about every {_span(info['every'] / 1000)}. {since} "
+        tip = (f"Restarts about every {_span(info['every'] / 1000)}, next in about {_span(left)}. "
                "Mod updates usually land on restart, so you may need to rejoin through DZSL.")
-        return f"↻ {_span(left)}", tip, left <= SOON_SECONDS
-    if now - last > 24 * 3600:
-        return None
-    tip = f"{since} Not enough restarts seen yet to predict the next one."
-    return f"up {_span(now - last)}", tip, False
+        return f"{text} · next {_span(left)}", tip, left <= SOON_SECONDS
+    return text, "Not enough restarts seen yet to predict the next one.", False
