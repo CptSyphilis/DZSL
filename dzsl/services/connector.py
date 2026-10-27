@@ -17,6 +17,7 @@ from dzsl.services.dayz import (
 from dzsl.services.launch_gate import launch_block_reason
 from dzsl.services.a2s import query_mods
 from dzsl.services.server_api import fetch_server
+from dzsl.services.updates import outdated_mods
 from dzsl.steam import gate as workshop_gate
 
 from dzsl.ui.download import ModDownloadManager
@@ -457,11 +458,29 @@ class Connector:
         self.set_status("Resolving server mod list…")
         server_mods, mod_names = self._resolve_mods(server)
 
+        self.subscriptions.min_updated = {}
         if server_mods:
             missing = [
                 m for m in server_mods
                 if not mod_installed(self.cfg, m) or not mod_subscribed(self.cfg, m)
             ]
+            self.set_status("Checking Workshop for mod updates…")
+            try:
+                outdated = {
+                    m["id"]: m["time_updated"]
+                    for m in outdated_mods(self.cfg, timeout=10, mod_ids=server_mods)
+                    if m["id"] not in missing
+                }
+            except Exception as exc:
+                log.warning("Workshop update check failed: %s", exc)
+                outdated = {}
+            if outdated:
+                log.info(
+                    "Workshop has newer versions of: %s",
+                    ", ".join((mod_names or {}).get(m, m) for m in outdated),
+                )
+                self.subscriptions.min_updated = outdated
+                missing += list(outdated)
             if missing:
                 self._refresh_cfg()
                 queue, sizes = self._prepare_mod_queue(missing, mod_names)
@@ -513,7 +532,7 @@ class Connector:
         d = Adw.MessageDialog(transient_for=self.win)
         d.set_heading(f"{len(mod_ids)} mods required")
         d.set_body(
-            "Missing:\n" + "\n".join(lines[:12])
+            "Missing or outdated:\n" + "\n".join(lines[:12])
             + ("\n…" if len(lines) > 12 else "")
             + f"\n\nDZSL will download and set up mods for {action} via the Steam client."
         )

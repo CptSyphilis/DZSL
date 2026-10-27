@@ -7,6 +7,7 @@ from dzsl.core.config import (
     mod_installed,
     mod_staging_signature,
     mod_subscribed,
+    mod_up_to_date,
 )
 from dzsl.core.logging import get_logger
 from dzsl.runtime import is_flatpak
@@ -95,6 +96,11 @@ class SteamSubscriptionManager:
         self.is_steam_running = is_steam_running
         self.wait_for_steam_start = wait_for_steam_start
         self.launch_steam = launch_steam
+        self.min_updated = {}
+
+    def mod_ready(self, mod_id):
+        mid = str(mod_id)
+        return mod_installed(self.cfg, mid) and mod_up_to_date(self.cfg, mid, self.min_updated.get(mid))
 
     @property
     def cfg(self):
@@ -196,7 +202,7 @@ class SteamSubscriptionManager:
 
             self.refresh_cfg()
             subscribed = mod_subscribed(self.cfg, mid)
-            if mod_installed(self.cfg, mid):
+            if self.mod_ready(mid):
                 log.info("%s installed and current after %ds", mod_name, elapsed)
                 return True
 

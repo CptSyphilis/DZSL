@@ -70,7 +70,7 @@ class ModDownloadManager:
         pending = []
         done = 0
         for mid in ids:
-            if mod_installed(self.cfg, mid) and mod_subscribed(self.cfg, mid):
+            if self.subscriptions.mod_ready(mid) and mod_subscribed(self.cfg, mid):
                 log.info("Already installed: %s", names.get(mid, mid))
                 self.mark_mod_progress(progress, mid)
                 done += 1

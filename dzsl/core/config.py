@@ -330,6 +330,12 @@ def mod_download_progress(cfg, mod_id):
 def mod_staging_signature(cfg, mod_id):
     return item_staging_signature(workshop_acf_paths(cfg), mod_id, DAYZ_APPID)
 
+def mod_up_to_date(cfg, mod_id, min_updated):
+    if not min_updated:
+        return True
+    installed = item_record(workshop_acf_paths(cfg), str(mod_id)).get("installed") or {}
+    return int(installed.get("timeupdated", 0) or 0) >= int(min_updated)
+
 def mod_installed(cfg, mod_id):
     mid = str(mod_id)
     manifests = workshop_acf_paths(cfg)

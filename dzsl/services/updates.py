@@ -13,8 +13,11 @@ from dzsl.steam.workshop import item_record
 APP_ID = "com.dayzlinux.dzsl"
 
 
-def outdated_mods(cfg, timeout=15):
+def outdated_mods(cfg, timeout=15, mod_ids=None):
     mods = get_installed_mods(cfg)
+    if mod_ids is not None:
+        wanted = {str(mid) for mid in mod_ids}
+        mods = [m for m in mods if m["id"] in wanted]
     if not mods:
         return []
     manifests = workshop_acf_paths(cfg)
@@ -35,7 +38,7 @@ def outdated_mods(cfg, timeout=15):
             except OSError:
                 continue
         if remote > local:
-            stale.append(mod)
+            stale.append({**mod, "time_updated": remote})
     return stale
 
 
